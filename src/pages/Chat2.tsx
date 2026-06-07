@@ -43,6 +43,9 @@ import { createDownscaledPreview, createPreviewUrl, detectDeviceCapabilities } f
 // ── NEW: Camera sharing imports ────────────────────────────────────────────────
 import { useWebRTCCamera } from '../hooks/useWebRTCCamera';
 import CameraShareOverlay from '../components/CameraShareOverlay';
+import { useVoiceCall } from '../hooks/useVoiceCall';
+import VoiceCallScreen from '../components/VoiceCallScreen';
+import BookIconMenu from '../components/BookIconMenu';
 // ──────────────────────────────────────────────────────────────────────────────
 
 const BACKEND_URL = "https://notification-production-bdd8.up.railway.app"; //// vishwanavyasree account 12/5/26
@@ -99,8 +102,7 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
   const [replyToMood, setReplyToMood] = useState<{ emoji: string; partnerNickname: string } | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
-  // ── NEW: Camera sharing state ────────────────────────────────────────────────
-  // isCameraSharing = true when the book icon is toggled ON
+  // ── Camera sharing state ──────────────────────────────────────────────────
   const [isCameraSharing, setIsCameraSharing] = useState(false);
 
   const {
@@ -113,20 +115,46 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
     stop: stopCameraSharing,
   } = useWebRTCCamera({ nickname, isEnabled: isCameraSharing });
 
-  const handleBookIconToggle = () => {
-    setIsCameraSharing((prev) => {
-      if (prev) {
-        // Toggling OFF — clean up WebRTC
-        stopCameraSharing();
-        return false;
-      }
+  const handleCameraShareClose = () => {
+    stopCameraSharing();
+    setIsCameraSharing(false);
+  };
+
+  // ── Voice call state ──────────────────────────────────────────────────────
+  const {
+    callStatus,
+    remoteStream: callRemoteStream,
+    localStream:  callLocalStream,
+    isMicOn,
+    isSpeakerOn,
+    isNearEar,
+    callerName,
+    startCall,
+    acceptCall,
+    rejectCall,
+    endCall,
+    toggleMic,
+    toggleSpeaker,
+  } = useVoiceCall(nickname);
+
+  // Is a call screen visible? (calling, incoming, connected, ended, busy)
+  const isCallScreenVisible = callStatus !== "idle";
+
+  // Book icon menu handlers
+  const handleStartCamera = () => {
+    setIsCameraSharing(prev => {
+      if (prev) { stopCameraSharing(); return false; }
       return true;
     });
   };
 
-  const handleCameraShareClose = () => {
-    stopCameraSharing();
-    setIsCameraSharing(false);
+  const handleStartCall = () => {
+    // Check if other user is online before calling
+    if (isOtherUserOnline === false) {
+      alert(`${nickname === 'Vishwa' ? 'Ammu' : 'Vishwa'} is offline. Try again when they're online.`);
+      return;
+    }
+    startCall();
   };
   // ────────────────────────────────────────────────────────────────────────────
 
@@ -822,6 +850,23 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
       <KissEmojiRain show={showKissRain} onComplete={() => setShowKissRain(false)} />
       <MoodReactor isActive={isReactorActive} onComplete={handleReactorComplete} />
 
+      {/* ── Voice call full-screen overlay ── */}
+      {isCallScreenVisible && (
+        <VoiceCallScreen
+          callStatus={callStatus}
+          callerName={callerName}
+          nickname={nickname}
+          isMicOn={isMicOn}
+          isSpeakerOn={isSpeakerOn}
+          isNearEar={isNearEar}
+          onAccept={acceptCall}
+          onReject={rejectCall}
+          onEnd={endCall}
+          onToggleMic={toggleMic}
+          onToggleSpeaker={toggleSpeaker}
+        />
+      )}
+
       {isCameraOn && (
         <CameraButton
           isCameraOn={isCameraOn}
@@ -878,37 +923,13 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 flex-shrink-0 min-w-0">
-              {/*
-                ── UPDATED BOOK ICON ──────────────────────────────────────────
-                Clicking the BookOpen icon now toggles camera sharing ON/OFF.
-                - Green + filled style when active
-                - Normal green when inactive
-                A small pulsing dot appears when camera sharing is live.
-              */}
-              <div className="relative flex-shrink-0">
-                <button
-                  onClick={handleBookIconToggle}
-                  title={isCameraSharing ? "Stop camera sharing" : "Start camera sharing"}
-                  className={`transition-all duration-200 rounded-full p-0.5 ${
-                    isCameraSharing
-                      ? 'bg-green-500 text-white shadow-lg shadow-green-300'
-                      : 'text-green-600 hover:bg-green-100'
-                  }`}
-                >
-                  <BookOpen
-                    className={`w-5 h-5 sm:w-6 sm:h-6 transition-all duration-200 ${
-                      isCameraSharing ? 'text-white' : 'text-green-600'
-                    }`}
-                    fill={isCameraSharing ? 'currentColor' : 'none'}
-                  />
-                </button>
-
-                {/* Live indicator dot */}
-                {isCameraSharing && (
-                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-red-500 border-2 border-white animate-pulse" />
-                )}
-              </div>
-              {/* ─────────────────────────────────────────────────────────── */}
+              {/* ── Book icon → popup menu with Camera + Voice Call options ── */}
+              <BookIconMenu
+                isCameraSharing={isCameraSharing}
+                isInCall={isCallScreenVisible}
+                onStartCamera={handleStartCamera}
+                onStartCall={handleStartCall}
+              />
 
               <div className="min-w-0">
                 <h1 className="text-sm sm:text-lg font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent truncate">
