@@ -8,14 +8,14 @@ import { getFirestore, doc, setDoc, getDoc, serverTimestamp } from 'firebase/fir
 // ---------------------------------------------------------------------------
 // 1) Separate Firebase project config for Last Seen
 // ---------------------------------------------------------------------------
-const lastSeenFirebaseConfig = {
-  apiKey: "AIzaSyAliH8x893VjW3hTuZZD_eX9uMh9h9mSCM",
-  authDomain: "lastseen-8800e.firebaseapp.com",
-  projectId: "lastseen-8800e",
-  storageBucket: "lastseen-8800e.firebasestorage.app",
-  messagingSenderId: "955054201089",
-  appId: "1:955054201089:web:798df37c21f4a56d4d2300",
-  measurementId: "G-HFGR9X891M",
+const firebaseConfig = {
+  apiKey: 'AIzaSyAK3dhL0n32MqWfDavhV6jf1vHHDSH30uo',
+  authDomain: 'nxtwave-67c07.firebaseapp.com',
+  projectId: 'nxtwave-67c07',
+  storageBucket: 'nxtwave-67c07.firebasestorage.app',
+  messagingSenderId: '960247652489',
+  appId: '1:960247652489:web:0eb635009b4f1497cae658',
+  measurementId: 'G-BJQHECBER0',
 };
 
 // ---------------------------------------------------------------------------
