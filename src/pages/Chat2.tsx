@@ -40,6 +40,10 @@ import VoiceMessageInline from '../components/VoiceMessageInline';
 import CoupleMemoryPage from '../components/ui/CoupleMemoryPage';
 import { createDownscaledPreview, createPreviewUrl, detectDeviceCapabilities } from '../lib/imageCompression';
 
+// ── NEW: Camera sharing imports ────────────────────────────────────────────────
+import { useWebRTCCamera } from '../hooks/useWebRTCCamera';
+import CameraShareOverlay from '../components/CameraShareOverlay';
+// ──────────────────────────────────────────────────────────────────────────────
 
 const BACKEND_URL = "https://notification-production-bdd8.up.railway.app"; //// vishwanavyasree account 12/5/26
 
@@ -60,6 +64,8 @@ interface Chat2Props {
  * 2. Properly cleans up blob URLs when no longer needed
  * 3. Processes camera images before showing preview
  * 4. Uses refs to track preview URLs for cleanup
+ *
+ * NEW: Camera sharing via book icon toggle (WebRTC + Socket.IO)
  */
 function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCoupleMemory }: Chat2Props) {
   const handleAIClick = () => {
@@ -92,6 +98,37 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
   const [showMoodPicker, setShowMoodPicker] = useState(false);
   const [replyToMood, setReplyToMood] = useState<{ emoji: string; partnerNickname: string } | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+
+  // ── NEW: Camera sharing state ────────────────────────────────────────────────
+  // isCameraSharing = true when the book icon is toggled ON
+  const [isCameraSharing, setIsCameraSharing] = useState(false);
+
+  const {
+    localStream,
+    remoteStream,
+    status: camSharingStatus,
+    errorMsg: camSharingError,
+    audioEnabled: camAudioEnabled,
+    toggleAudio: camToggleAudio,
+    stop: stopCameraSharing,
+  } = useWebRTCCamera({ nickname, isEnabled: isCameraSharing });
+
+  const handleBookIconToggle = () => {
+    setIsCameraSharing((prev) => {
+      if (prev) {
+        // Toggling OFF — clean up WebRTC
+        stopCameraSharing();
+        return false;
+      }
+      return true;
+    });
+  };
+
+  const handleCameraShareClose = () => {
+    stopCameraSharing();
+    setIsCameraSharing(false);
+  };
+  // ────────────────────────────────────────────────────────────────────────────
 
   // Memory state
   const [memoryState, setMemoryState] = useState<"closed" | "password" | "open">("closed");
@@ -226,8 +263,12 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
         console.log('🚪 Exiting Chat2, turning off camera...');
         setCameraOff();
       }
+      // Also stop camera sharing on unmount
+      if (isCameraSharing) {
+        stopCameraSharing();
+      }
     };
-  }, [isCameraOn, setCameraOff]);
+  }, [isCameraOn, setCameraOff, isCameraSharing, stopCameraSharing]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -522,17 +563,6 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
     }
   }, [msgs, nickname]);
 
-  // 🔥 MEMORY-OPTIMIZED: Old image upload handler removed
-  // The new InstagramPlusButton now handles image processing and passes
-  // both the file AND the preview URL directly to onImageSelect
-
-  /**
-   * 🔥 MEMORY-OPTIMIZED IMAGE HANDLER
-   * 
-   * This handler receives the already-processed image and preview URL
-   * from InstagramPlusButton. The preview URL is already a blob URL
-   * (not base64), which is much more memory efficient.
-   */
   const handleImageSelect = useCallback((file: File, previewUrl: string) => {
     // Clean up any existing preview URL
     if (imagePreviewUrlRef.current && imagePreviewUrlRef.current !== previewUrl) {
@@ -593,9 +623,6 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
     setImagePreview(null);
   };
 
-  /**
-   * 🔥 MEMORY-OPTIMIZED VIDEO HANDLER
-   */
   const handleVideoSelect = useCallback((file: File, previewUrl: string) => {
     // Clean up any existing preview URL
     if (videoPreviewUrlRef.current && videoPreviewUrlRef.current !== previewUrl) {
@@ -646,9 +673,6 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
     setVideoPreview(null);
   };
 
-  /**
-   * 🔥 MEMORY-OPTIMIZED FILE HANDLER
-   */
   const handleFileSelect = useCallback((file: File, previewUrl: string) => {
     setSelectedFile(file);
     setFilePreview(previewUrl || file.name); // Use filename if no preview
@@ -807,6 +831,19 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
         />
       )}
 
+      {/* ── NEW: Camera sharing overlay (WebRTC floating window) ── */}
+      <CameraShareOverlay
+        localStream={localStream}
+        remoteStream={remoteStream}
+        status={camSharingStatus}
+        errorMsg={camSharingError}
+        nickname={nickname}
+        isEnabled={isCameraSharing}
+        audioEnabled={camAudioEnabled}
+        onToggleAudio={camToggleAudio}
+        onClose={handleCameraShareClose}
+      />
+
 <style jsx>{`
   @keyframes swing {
     0%, 100% {
@@ -841,7 +878,38 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 flex-shrink-0 min-w-0">
-              <BookOpen className="w-5 h-5 sm:w-6 sm:h-6 text-green-600 flex-shrink-0" />
+              {/*
+                ── UPDATED BOOK ICON ──────────────────────────────────────────
+                Clicking the BookOpen icon now toggles camera sharing ON/OFF.
+                - Green + filled style when active
+                - Normal green when inactive
+                A small pulsing dot appears when camera sharing is live.
+              */}
+              <div className="relative flex-shrink-0">
+                <button
+                  onClick={handleBookIconToggle}
+                  title={isCameraSharing ? "Stop camera sharing" : "Start camera sharing"}
+                  className={`transition-all duration-200 rounded-full p-0.5 ${
+                    isCameraSharing
+                      ? 'bg-green-500 text-white shadow-lg shadow-green-300'
+                      : 'text-green-600 hover:bg-green-100'
+                  }`}
+                >
+                  <BookOpen
+                    className={`w-5 h-5 sm:w-6 sm:h-6 transition-all duration-200 ${
+                      isCameraSharing ? 'text-white' : 'text-green-600'
+                    }`}
+                    fill={isCameraSharing ? 'currentColor' : 'none'}
+                  />
+                </button>
+
+                {/* Live indicator dot */}
+                {isCameraSharing && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-red-500 border-2 border-white animate-pulse" />
+                )}
+              </div>
+              {/* ─────────────────────────────────────────────────────────── */}
+
               <div className="min-w-0">
                 <h1 className="text-sm sm:text-lg font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent truncate">
                   AI Teacher
@@ -926,10 +994,9 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
         </div>
       </div>
 
-      {/* Mobile Moods - Fixed: Separate Moods text from MoodDisplay */}
+      {/* Mobile Moods */}
       <div className="sm:hidden fixed top-14 left-0 right-0 z-40 flex justify-center px-2 pt-2">
         <div className="flex flex-col items-center gap-1 bg-transparent rounded-b-3xl px-6 py-3">
-          {/* Only this text navigates to Chat3 */}
           <button
             onClick={onSwitchToChat3}
             className="text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors cursor-pointer"
@@ -937,7 +1004,6 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
             Moods
           </button>
           
-          {/* MoodDisplay - clicking emoji opens picker */}
           <MoodDisplay
             userMood={userMood}
             otherUserMood={otherUserMood}
@@ -1124,7 +1190,6 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
 
         <form onSubmit={handleSendMessage} className="max-w-4xl mx-auto">
           <div className="flex gap-3 items-end">
-            {/* 🔥 MEMORY-OPTIMIZED: Updated callback signature */}
             <InstagramPlusButton
               onImageSelect={handleImageSelect}
               onVideoSelect={handleVideoSelect}
