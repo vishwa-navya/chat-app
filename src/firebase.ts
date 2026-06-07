@@ -15,12 +15,13 @@ import {
 // 1) Firebase project config (UPDATED)
 // ---------------------------------------------------------------------------
 const firebaseConfig = {
-  apiKey: 'AIzaSyCJB10ot9q_6KpI_borDB987gZWuidX40I',
-  authDomain: 'vishwanavya-72a92.firebaseapp.com',
-  projectId: 'vishwanavya-72a92',
-  storageBucket: 'vishwanavya-72a92.appspot.com',
-  messagingSenderId: '34331683691',
-  appId: '1:34331683691:web:09cd70702c7f70dd83fa2e',
+  apiKey: 'AIzaSyAK3dhL0n32MqWfDavhV6jf1vHHDSH30uo',
+  authDomain: 'nxtwave-67c07.firebaseapp.com',
+  projectId: 'nxtwave-67c07',
+  storageBucket: 'nxtwave-67c07.firebasestorage.app',
+  messagingSenderId: '960247652489',
+  appId: '1:960247652489:web:0eb635009b4f1497cae658',
+  measurementId: 'G-BJQHECBER0',
 };
 
 // ---------------------------------------------------------------------------
