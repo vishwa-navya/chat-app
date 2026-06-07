@@ -1,0 +1,229 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Basic reset + box-sizing */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+:root {
+  /* --vh is set by the small script in index.html */
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Use CSS variable instead of 100vh directly to avoid mobile browser chrome issues */
+html, body, #root {
+  min-height: 100dvh;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background: #f0fdf4;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;  /* ✅ Keep layout clean */
+  overflow-y: auto;    /* ✅ Allow vertical stretch + scroll */
+}
+
+
+/* App root should be a column flex so footer/input stays at the bottom */
+.app-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0; /* important so child can overflow */
+}
+
+/* Header (top bar) - non-scrolling */
+.header {
+  flex: 0 0 auto;
+  /* your header styling */
+}
+
+/* Chat area: expands and scrolls */
+.chat-container {
+  flex: 1 1 auto;
+  min-height: 0; /* critical for proper overflow within flex */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px;
+  /* ensure bottom padding accounts for the safe area + some spacing */
+  padding-bottom: calc(16px + var(--safe-bottom));
+}
+
+/* Footer/input area — stays at the bottom (normal document flow, no fixed) */
+.footer {
+  flex: 0 0 auto;
+  padding: 12px 16px calc(12px + var(--safe-bottom)); /* keep safe area */
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  background: transparent; /* make transparent to show background image under it */
+}
+
+/* Rounded message input like your screenshots */
+.input-pill {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  border-radius: 9999px;
+  padding: 10px 14px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+}
+
+/* Floating buttons (camera / send / fab) - place relative to footer, no bottom offset issues */
+.fab-right {
+  /* if you want a floating round button, position it relative to the footer edges
+     but avoid position: fixed if any ancestor has transform. Prefer absolute inside root. */
+  position: relative; /* keep within footer flow */
+}
+
+/* keep animations and message bubble rules you already had */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.animate-fade-in { animation: fade-in 0.3s ease-out; }
+.animate-slide-in-right { animation: slide-in-right 0.3s ease-out; }
+.animate-slide-in-left { animation: slide-in-left 0.3s ease-out; }
+
+/* Message bubble constraints */
+.message-bubble {
+  max-width: 80vw;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+}
+@media (min-width: 640px) {
+  .message-bubble { max-width: 320px; }
+}
+
+/* Highlight animation for replied messages */
+.highlight-message { animation: highlightFade 2s ease-in-out; }
+@keyframes highlightFade {
+  0% { background-color: rgba(59,130,246,0.3); transform: scale(1.02); }
+  50% { background-color: rgba(59,130,246,0.2); }
+  100% { background-color: transparent; transform: scale(1); }
+}
+
+/* emoji fall animations kept as-is (unchanged) */
+@keyframes fall-emoji { 0% { transform: translateY(-60px) rotate(0deg); opacity: 1; } 100% { transform: translateY(calc(100vh + 60px)) rotate(360deg); opacity: 0; } }
+@keyframes fall-text { 0% { transform: translateX(-50%) translateY(-100px); opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { transform: translateX(-50%) translateY(calc(100vh + 100px)); opacity: 0; } }
+.animate-fall-emoji { animation: fall-emoji 2s ease-in forwards; }
+.animate-fall-text { animation: fall-text 3s ease-in-out forwards; }
+
+/* Seen Dots Blast Animation */
+/* ⭐ STRONG BLAST / HAMMER-HIT EFFECT */
+@keyframes seen-dot-blast {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+    filter: brightness(1);
+  }
+  40% {
+    transform: scale(1.8) translateY(-4px);
+    filter: brightness(1.4);
+  }
+  70% {
+    transform: scale(0.9) translateY(2px);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+    filter: brightness(1);
+  }
+}
+
+/* ⭐ STRONG SHAKE (STRONGER THAN BEFORE) */
+@keyframes seen-dot-shake {
+  0%, 100% { transform: scale(1); }
+  20% { transform: scale(1.2) translateX(-3px); }
+  40% { transform: scale(1.25) translateX(3px); }
+  60% { transform: scale(1.2) translateX(-3px); }
+  80% { transform: scale(1.15) translateX(3px); }
+}
+
+/* ⭐ PARTICLE BURST — BIGGER EXPLOSION + FASTER DROP */
+@keyframes particle-burst {
+  0% {
+    transform: translate(0, 0) scale(1.4);     /* bigger particles */
+    opacity: 1;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--particle-x), calc(var(--particle-y) + 60px)) scale(0);
+    opacity: 0;
+  }
+}
+
+/* ⭐ APPLY STRONG BLAST */
+.seen-dots-blast {
+  animation: seen-dot-blast 0.35s cubic-bezier(0.3, 1.6, 0.4, 1) forwards,
+             seen-dot-shake 0.25s ease-out forwards;
+}
+
+/* ⭐ PARTICLES */
+.seen-particle {
+  position: absolute;
+  width: 4px; /* bigger sparks */
+  height: 4px;
+  border-radius: 50%;
+  background-color: rgb(156, 163, 175);  /* gray sparks */
+  top: 50%;
+  left: 50%;
+  transform-origin: center;
+  transform: translate(-50%, -50%);
+  animation: particle-burst 1.4s ease-out forwards;
+  pointer-events: none;
+}
+/* Blast shake */
+@keyframes seen-dots-blast {
+  0% { transform: scale(1); }
+  25% { transform: scale(1.4) rotate(-8deg); }
+  50% { transform: scale(1.6) rotate(8deg); }
+  75% { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+
+.seen-dots-blast {
+  animation: seen-dots-blast 0.25s ease-out;
+}
+
+/* Particle burst + fall */
+@keyframes particle-burst {
+  0% {
+    opacity: 1;
+    transform: translate(0,0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--particle-x), calc(var(--particle-y) + 30px)) scale(0);
+  }
+}
+
+.seen-particle {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  animation: particle-burst 1.2s ease-out forwards;
+}
+.hide-scrollbar {
+  scrollbar-width: none;        /* Firefox */
+  -ms-overflow-style: none;     /* IE 10+ */
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;                /* Chrome, Safari */
+}

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="description" content="Doctor's Study Portal - AI Teacher Chat" />
+    
+    <!-- Prevent zoom on input focus for iOS -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <title>Doctor's Study Portal</title>
+
+    <style>
+      /* Prevent bounce scroll on iOS */
+      body, html {
+        overscroll-behavior: none;
+      }
+      
+      /* Prevent auto-zoom on input focus */
+      input, textarea, select {
+        font-size: 16px !important;
+      }
+    </style>
+
+    <!--
+      JS: set a CSS variable --vh to handle mobile 100vh problems.
+      This makes "height: calc(var(--vh) * 100)" behave like the real viewport height.
+      Also handles address bar show/hide on mobile browsers.
+    -->
+    <script>
+      (function () {
+        function setVh() {
+          document.documentElement.style.setProperty('--vh', (window.innerHeight * 0.01) + 'px');
+          // provide safe bottom as var too (fallback 0px)
+          document.documentElement.style.setProperty('--safe-bottom', 'env(safe-area-inset-bottom, 0px)');
+        }
+        
+        // Set on initial load
+        setVh();
+        
+        // Update on resize and orientation change
+        window.addEventListener('resize', setVh);
+        window.addEventListener('orientationchange', setVh);
+        window.addEventListener('load', setVh);
+        
+        // Handle address bar showing/hiding on mobile
+        let lastViewportHeight = window.innerHeight;
+        window.addEventListener('scroll', () => {
+          const currentHeight = window.innerHeight;
+          if (currentHeight !== lastViewportHeight) {
+            setVh();
+            lastViewportHeight = currentHeight;
+          }
+        }, { passive: true });
+      })();
+    </script>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
