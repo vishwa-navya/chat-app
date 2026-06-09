@@ -859,7 +859,6 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
           isMicOn={isMicOn}
           isSpeakerOn={isSpeakerOn}
           isNearEar={isNearEar}
-          callDuration={callDuration}
           onAccept={acceptCall}
           onReject={rejectCall}
           onEnd={endCall}
