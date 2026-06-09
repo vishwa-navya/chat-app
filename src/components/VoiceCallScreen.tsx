@@ -1,17 +1,17 @@
 /**
- * VoiceCallScreen.tsx — v2
+ * VoiceCallScreen.tsx — v3
  *
- * Full white screen call UI.
- * - calling:   ripple animation, "Calling Ammu..." + cancel button
- * - incoming:  ripple, green accept + red reject
- * - connected: name, live timer, mic/speaker/end buttons
- *              isNearEar=true → hides ALL buttons (proximity sensor blank screen)
- * - busy:      offline message
- * - ended:     "Call Ended"
+ * callStatus "calling"    → small floating bar at top only (caller sees chat still)
+ * callStatus "incoming"   → full white screen: Accept + Reject
+ * callStatus "connecting" → full white screen: spinner "Connecting..."
+ * callStatus "connected"  → full white screen: Mic + End + Speaker + timer
+ * callStatus "busy"       → full white screen: offline message
+ * callStatus "ended"      → full white screen: "Call Ended"
+ * isNearEar = true        → pure black screen, nothing pressable
  */
 
-import React, { useEffect, useState } from "react";
-import { Mic, MicOff, Volume2, VolumeX, PhoneOff, Phone } from "lucide-react";
+import React from "react";
+import { Mic, MicOff, Volume2, VolumeX, PhoneOff, Phone, Loader2 } from "lucide-react";
 import type { CallStatus } from "../hooks/useVoiceCall";
 
 interface VoiceCallScreenProps {
@@ -44,10 +44,10 @@ function RippleAvatar({ name, color = "#10b981" }: { name: string; color?: strin
       ))}
       <div style={{
         width: 96, height: 96, borderRadius: "50%", zIndex: 1, position: "relative",
-        background: `linear-gradient(135deg, ${color}, ${color}cc)`,
+        background: `linear-gradient(135deg, ${color}, ${color}bb)`,
         display: "flex", alignItems: "center", justifyContent: "center",
         fontSize: 38, fontWeight: 800, color: "#fff",
-        boxShadow: `0 8px 32px ${color}55`,
+        boxShadow: `0 8px 32px ${color}44`,
       }}>
         {name.charAt(0).toUpperCase()}
       </div>
@@ -61,7 +61,7 @@ function RippleAvatar({ name, color = "#10b981" }: { name: string; color?: strin
   );
 }
 
-// ── Round call button ─────────────────────────────────────────────────────────
+// ── Round button ──────────────────────────────────────────────────────────────
 function RoundBtn({ onClick, bg, children, label, size = 62 }: {
   onClick: () => void; bg: string; children: React.ReactNode; label?: string; size?: number;
 }) {
@@ -71,7 +71,7 @@ function RoundBtn({ onClick, bg, children, label, size = 62 }: {
         width: size, height: size, borderRadius: "50%", border: "none",
         background: bg, cursor: "pointer",
         display: "flex", alignItems: "center", justifyContent: "center",
-        boxShadow: "0 4px 18px rgba(0,0,0,0.15)",
+        boxShadow: "0 4px 18px rgba(0,0,0,0.13)",
         transition: "transform .12s",
       }}
       onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = "scale(1.08)"; }}
@@ -84,15 +84,11 @@ function RoundBtn({ onClick, bg, children, label, size = 62 }: {
   );
 }
 
-// ── Duration timer ────────────────────────────────────────────────────────────
+// ── Duration ──────────────────────────────────────────────────────────────────
 function Duration({ seconds }: { seconds: number }) {
   const m = String(Math.floor(seconds / 60)).padStart(2, "0");
   const s = String(seconds % 60).padStart(2, "0");
-  return (
-    <span style={{ fontSize: 20, color: "#6b7280", fontWeight: 500, letterSpacing: 3 }}>
-      {m}:{s}
-    </span>
-  );
+  return <span style={{ fontSize: 20, color: "#6b7280", fontWeight: 500, letterSpacing: 3 }}>{m}:{s}</span>;
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -105,47 +101,66 @@ export default function VoiceCallScreen({
   const other       = nickname === "Vishwa" ? "Ammu" : "Vishwa";
   const displayName = callerName ?? other;
 
-  // Proximity → completely black screen, no buttons
-  if (isNearEar && callStatus === "connected") {
-    return (
-      <div style={{
-        position: "fixed", inset: 0, zIndex: 1000,
-        background: "#000000",
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }}>
-        {/* Completely black — nothing visible, nothing pressable */}
-      </div>
-    );
-  }
-
-  // ── Calling ──────────────────────────────────────────────────────────────────
+  // ── "calling" = small top bar only — caller still sees the chat ───────────────
+  // This is the KEY fix: caller does NOT get full white screen
   if (callStatus === "calling") {
     return (
-      <div style={FULL}>
-        <div style={CENTER}>
-          <RippleAvatar name={displayName} />
-          <h2 style={NAME}>{displayName}</h2>
-          <p style={SUB}>Calling…</p>
+      <div style={{
+        position: "fixed", top: 0, left: 0, right: 0,
+        zIndex: 1000,
+        background: "linear-gradient(135deg, #10b981, #059669)",
+        padding: "10px 20px",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        boxShadow: "0 2px 16px rgba(16,185,129,0.4)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {/* Animated calling dots */}
+          <div style={{ display: "flex", gap: 4 }}>
+            {[0, 1, 2].map(i => (
+              <span key={i} style={{
+                width: 7, height: 7, borderRadius: "50%", background: "#fff",
+                display: "inline-block",
+                animation: `dot 1.2s ${i * 0.2}s infinite ease-in-out`,
+              }} />
+            ))}
+          </div>
+          <span style={{ color: "#fff", fontWeight: 600, fontSize: 14 }}>
+            Calling {displayName}…
+          </span>
         </div>
-        <div style={BOTTOM}>
-          <RoundBtn onClick={onEnd} bg="#ef4444" size={72} label="Cancel">
-            <PhoneOff size={28} color="#fff" />
-          </RoundBtn>
-        </div>
+        {/* Cancel button */}
+        <button onClick={onEnd} style={{
+          background: "rgba(255,255,255,0.2)", border: "none",
+          borderRadius: 20, padding: "6px 16px", color: "#fff",
+          fontSize: 13, fontWeight: 600, cursor: "pointer",
+        }}>
+          Cancel
+        </button>
+        <style>{`
+          @keyframes dot {
+            0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+            40%            { transform: scale(1);   opacity: 1; }
+          }
+        `}</style>
       </div>
     );
   }
 
-  // ── Incoming ─────────────────────────────────────────────────────────────────
+  // ── Proximity sensor: pure black ───────────────────────────────────────────────
+  if (isNearEar && (callStatus === "connected" || callStatus === "connecting")) {
+    return <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "#000" }} />;
+  }
+
+  // ── Incoming call ──────────────────────────────────────────────────────────────
   if (callStatus === "incoming") {
     return (
       <div style={FULL}>
         <div style={CENTER}>
           <RippleAvatar name={displayName} color="#10b981" />
           <h2 style={NAME}>{displayName}</h2>
-          <p style={SUB}>Voice Call…</p>
+          <p style={SUB}>Incoming voice call…</p>
         </div>
-        <div style={{ ...BOTTOM, gap: 56 }}>
+        <div style={{ ...BOTTOM, gap: 60 }}>
           <RoundBtn onClick={onReject} bg="#ef4444" size={72} label="Decline">
             <PhoneOff size={28} color="#fff" />
           </RoundBtn>
@@ -157,19 +172,79 @@ export default function VoiceCallScreen({
     );
   }
 
-  // ── Busy / offline ────────────────────────────────────────────────────────────
-  if (callStatus === "busy") {
+  // ── Connecting (WebRTC negotiating after accept) ───────────────────────────────
+  if (callStatus === "connecting") {
     return (
       <div style={FULL}>
         <div style={CENTER}>
           <div style={{
             width: 96, height: 96, borderRadius: "50%",
-            background: "#f3f4f6",
+            background: "linear-gradient(135deg,#10b981,#059669)",
             display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 38, fontWeight: 800, color: "#fff",
           }}>
+            {displayName.charAt(0).toUpperCase()}
+          </div>
+          <h2 style={{ ...NAME, marginTop: 20 }}>{displayName}</h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+            <Loader2 size={18} color="#10b981" style={{ animation: "spin 1s linear infinite" }} />
+            <p style={{ ...SUB, margin: 0 }}>Connecting…</p>
+          </div>
+        </div>
+        <div style={BOTTOM}>
+          <RoundBtn onClick={onEnd} bg="#ef4444" size={64} label="End">
+            <PhoneOff size={24} color="#fff" />
+          </RoundBtn>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  // ── Connected ──────────────────────────────────────────────────────────────────
+  if (callStatus === "connected") {
+    return (
+      <div style={FULL}>
+        <div style={{ ...CENTER, paddingTop: 80, gap: 12 }}>
+          <div style={{
+            width: 88, height: 88, borderRadius: "50%",
+            background: "linear-gradient(135deg,#10b981,#059669)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 32, fontWeight: 800, color: "#fff",
+            boxShadow: "0 4px 24px rgba(16,185,129,0.3)",
+          }}>
+            {displayName.charAt(0).toUpperCase()}
+          </div>
+          <h2 style={NAME}>{displayName}</h2>
+          <Duration seconds={callDuration} />
+          <span style={{ fontSize: 12, color: isSpeakerOn ? "#10b981" : "#9ca3af", fontWeight: 500 }}>
+            {isSpeakerOn ? "🔊 Loudspeaker" : "🔇 Earpiece"}
+          </span>
+        </div>
+        <div style={{ ...BOTTOM, gap: 28, paddingBottom: 60 }}>
+          <RoundBtn onClick={onToggleMic} bg={isMicOn ? "#f3f4f6" : "#1f2937"} label={isMicOn ? "Mute" : "Unmute"} size={58}>
+            {isMicOn ? <Mic size={22} color="#374151" /> : <MicOff size={22} color="#fff" />}
+          </RoundBtn>
+          <RoundBtn onClick={onEnd} bg="#ef4444" size={72} label="End">
+            <PhoneOff size={28} color="#fff" />
+          </RoundBtn>
+          <RoundBtn onClick={onToggleSpeaker} bg={isSpeakerOn ? "#10b981" : "#f3f4f6"} label={isSpeakerOn ? "Speaker" : "Earpiece"} size={58}>
+            {isSpeakerOn ? <Volume2 size={22} color="#fff" /> : <VolumeX size={22} color="#374151" />}
+          </RoundBtn>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Busy / offline ─────────────────────────────────────────────────────────────
+  if (callStatus === "busy") {
+    return (
+      <div style={FULL}>
+        <div style={CENTER}>
+          <div style={{ width: 96, height: 96, borderRadius: "50%", background: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <PhoneOff size={38} color="#9ca3af" />
           </div>
-          <h2 style={{ ...NAME, marginTop: 24 }}>{displayName}</h2>
+          <h2 style={{ ...NAME, marginTop: 20 }}>{displayName}</h2>
           <p style={{ ...SUB, color: "#ef4444" }}>is offline</p>
           <p style={{ fontSize: 13, color: "#9ca3af", marginTop: 4 }}>Try again when they're online</p>
         </div>
@@ -182,85 +257,16 @@ export default function VoiceCallScreen({
     );
   }
 
-  // ── Ended ─────────────────────────────────────────────────────────────────────
+  // ── Ended ──────────────────────────────────────────────────────────────────────
   if (callStatus === "ended") {
     return (
       <div style={FULL}>
         <div style={CENTER}>
-          <div style={{
-            width: 96, height: 96, borderRadius: "50%", background: "#f3f4f6",
-            display: "flex", alignItems: "center", justifyContent: "center",
-          }}>
+          <div style={{ width: 96, height: 96, borderRadius: "50%", background: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <PhoneOff size={38} color="#9ca3af" />
           </div>
-          <h2 style={{ ...NAME, marginTop: 24, color: "#9ca3af" }}>Call Ended</h2>
-          {callDuration > 0 && (
-            <p style={{ fontSize: 14, color: "#9ca3af", marginTop: 6 }}>
-              Duration: <Duration seconds={callDuration} />
-            </p>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // ── Connected ──────────────────────────────────────────────────────────────────
-  if (callStatus === "connected") {
-    return (
-      <div style={FULL}>
-        {/* Top half: avatar + name + timer */}
-        <div style={{ ...CENTER, paddingTop: 80, gap: 16 }}>
-          <div style={{
-            width: 88, height: 88, borderRadius: "50%",
-            background: "linear-gradient(135deg,#10b981,#059669)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 32, fontWeight: 800, color: "#fff",
-            boxShadow: "0 4px 24px rgba(16,185,129,0.3)",
-          }}>
-            {displayName.charAt(0).toUpperCase()}
-          </div>
-          <h2 style={NAME}>{displayName}</h2>
-          <Duration seconds={callDuration} />
-
-          {/* Speaker label */}
-          <span style={{
-            fontSize: 12, color: isSpeakerOn ? "#10b981" : "#9ca3af",
-            fontWeight: 500, marginTop: 2,
-          }}>
-            {isSpeakerOn ? "🔊 Speaker" : "🔇 Earpiece"}
-          </span>
-        </div>
-
-        {/* Bottom: Mic | End | Speaker */}
-        <div style={{ ...BOTTOM, gap: 28, paddingBottom: 60 }}>
-          {/* Mic toggle */}
-          <RoundBtn
-            onClick={onToggleMic}
-            bg={isMicOn ? "#f3f4f6" : "#1f2937"}
-            label={isMicOn ? "Mute" : "Unmute"}
-            size={58}
-          >
-            {isMicOn
-              ? <Mic    size={22} color="#374151" />
-              : <MicOff size={22} color="#fff" />}
-          </RoundBtn>
-
-          {/* End call — big center */}
-          <RoundBtn onClick={onEnd} bg="#ef4444" size={72} label="End">
-            <PhoneOff size={28} color="#fff" />
-          </RoundBtn>
-
-          {/* Speaker toggle */}
-          <RoundBtn
-            onClick={onToggleSpeaker}
-            bg={isSpeakerOn ? "#10b981" : "#f3f4f6"}
-            label={isSpeakerOn ? "Speaker" : "Earpiece"}
-            size={58}
-          >
-            {isSpeakerOn
-              ? <Volume2  size={22} color="#fff" />
-              : <VolumeX  size={22} color="#374151" />}
-          </RoundBtn>
+          <h2 style={{ ...NAME, marginTop: 20, color: "#9ca3af" }}>Call Ended</h2>
+          {callDuration > 0 && <p style={{ fontSize: 14, color: "#9ca3af", marginTop: 6 }}>Duration: <Duration seconds={callDuration} /></p>}
         </div>
       </div>
     );
@@ -270,21 +276,8 @@ export default function VoiceCallScreen({
 }
 
 // ── Shared styles ─────────────────────────────────────────────────────────────
-const FULL: React.CSSProperties = {
-  position: "fixed", inset: 0, zIndex: 1000,
-  background: "#ffffff",
-  display: "flex", flexDirection: "column",
-  alignItems: "center", justifyContent: "space-between",
-  fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-};
-const CENTER: React.CSSProperties = {
-  flex: 1, display: "flex", flexDirection: "column",
-  alignItems: "center", justifyContent: "center", gap: 8,
-};
-const BOTTOM: React.CSSProperties = {
-  display: "flex", flexDirection: "row",
-  alignItems: "center", justifyContent: "center",
-  gap: 32, paddingBottom: 52, width: "100%",
-};
-const NAME: React.CSSProperties  = { fontSize: 26, fontWeight: 700, color: "#111827", margin: 0 };
-const SUB: React.CSSProperties   = { fontSize: 15, color: "#6b7280", margin: 0 };
+const FULL:   React.CSSProperties = { position: "fixed", inset: 0, zIndex: 1000, background: "#ffffff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" };
+const CENTER: React.CSSProperties = { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 };
+const BOTTOM: React.CSSProperties = { display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 32, paddingBottom: 52, width: "100%" };
+const NAME:   React.CSSProperties = { fontSize: 26, fontWeight: 700, color: "#111827", margin: 0 };
+const SUB:    React.CSSProperties = { fontSize: 15, color: "#6b7280", margin: 0 };
