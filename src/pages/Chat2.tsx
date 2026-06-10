@@ -44,6 +44,7 @@ import { createDownscaledPreview, createPreviewUrl, detectDeviceCapabilities } f
 import { useWebRTCCamera } from '../hooks/useWebRTCCamera';
 import CameraShareOverlay from '../components/CameraShareOverlay';
 import { useVoiceCall } from '../hooks/useVoiceCall';
+import VoiceCallScreen from '../components/VoiceCallScreen';
 import BookIconMenu from '../components/BookIconMenu';
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -137,7 +138,7 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
   } = useVoiceCall(nickname);
 
   // Is a call screen visible? (calling, incoming, connected, ended, busy)
-  // callStatus "calling" = small 52px bar only at top, chat still visible
+  const isCallScreenVisible = callStatus !== "idle";
 
   // Book icon menu handlers
   const handleStartCamera = () => {
@@ -849,145 +850,21 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
       <KissEmojiRain show={showKissRain} onComplete={() => setShowKissRain(false)} />
       <MoodReactor isActive={isReactorActive} onComplete={handleReactorComplete} />
 
-      {/* ── INLINE VOICE CALL UI ── */}
-
-      {/* CALLER: small 52px green bar at top — chat still fully visible */}
-      {callStatus === "calling" && (
-        <div style={{
-          position:"fixed", top:0, left:0, right:0, height:52,
-          zIndex:9999, background:"linear-gradient(90deg,#10b981,#059669)",
-          display:"flex", alignItems:"center", justifyContent:"space-between",
-          padding:"0 16px", boxShadow:"0 2px 12px rgba(16,185,129,0.4)",
-        }}>
-          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <span style={{ color:"#fff", fontWeight:700, fontSize:14 }}>
-              📞 Calling {nickname === "Vishwa" ? "Ammu" : "Vishwa"}…
-            </span>
-          </div>
-          <button onClick={endCall} style={{
-            background:"rgba(255,255,255,0.25)", border:"none",
-            borderRadius:20, padding:"6px 16px",
-            color:"#fff", fontSize:13, fontWeight:700, cursor:"pointer",
-          }}>Cancel</button>
-        </div>
-      )}
-
-      {/* PROXIMITY SENSOR: pure black screen when phone near ear */}
-      {isNearEar && (callStatus === "connected" || callStatus === "connecting") && (
-        <div style={{ position:"fixed", inset:0, zIndex:9999, background:"#000" }}/>
-      )}
-
-      {/* INCOMING CALL: full white screen with accept/reject */}
-      {callStatus === "incoming" && !isNearEar && (
-        <div style={{ position:"fixed", inset:0, zIndex:9999, background:"#fff", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"space-between", fontFamily:"system-ui" }}>
-          <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16 }}>
-            <div style={{ width:96, height:96, borderRadius:"50%", background:"linear-gradient(135deg,#10b981,#059669)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:38, fontWeight:800, color:"#fff", boxShadow:"0 8px 32px rgba(16,185,129,0.3)" }}>
-              {(callerName ?? (nickname === "Vishwa" ? "Ammu" : "Vishwa")).charAt(0).toUpperCase()}
-            </div>
-            <h2 style={{ fontSize:26, fontWeight:700, color:"#111827", margin:0 }}>{callerName ?? (nickname === "Vishwa" ? "Ammu" : "Vishwa")}</h2>
-            <p style={{ fontSize:15, color:"#6b7280", margin:0 }}>Incoming voice call…</p>
-          </div>
-          <div style={{ display:"flex", gap:60, paddingBottom:56 }}>
-            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
-              <button onClick={rejectCall} style={{ width:72, height:72, borderRadius:"50%", border:"none", background:"#ef4444", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 4px 16px rgba(239,68,68,0.4)" }}>
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.42 19.42 0 0 1 4.43 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.34 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.32 9.9"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-              </button>
-              <span style={{ fontSize:11, color:"#9ca3af", fontWeight:500 }}>Decline</span>
-            </div>
-            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
-              <button onClick={acceptCall} style={{ width:72, height:72, borderRadius:"50%", border:"none", background:"#22c55e", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 4px 16px rgba(34,197,94,0.4)" }}>
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 15.1 19.79 19.79 0 0 1 1.62 6.53A2 2 0 0 1 3.59 4.34h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 12.1a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 18.92z"/></svg>
-              </button>
-              <span style={{ fontSize:11, color:"#9ca3af", fontWeight:500 }}>Accept</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* CONNECTING: full white screen with spinner */}
-      {callStatus === "connecting" && !isNearEar && (
-        <div style={{ position:"fixed", inset:0, zIndex:9999, background:"#fff", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"space-between", fontFamily:"system-ui" }}>
-          <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:14 }}>
-            <div style={{ width:88, height:88, borderRadius:"50%", background:"linear-gradient(135deg,#10b981,#059669)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:32, fontWeight:800, color:"#fff" }}>
-              {(callerName ?? (nickname === "Vishwa" ? "Ammu" : "Vishwa")).charAt(0).toUpperCase()}
-            </div>
-            <h2 style={{ fontSize:26, fontWeight:700, color:"#111827", margin:0 }}>{callerName ?? (nickname === "Vishwa" ? "Ammu" : "Vishwa")}</h2>
-            <p style={{ fontSize:15, color:"#6b7280", margin:0 }}>Connecting…</p>
-          </div>
-          <div style={{ paddingBottom:56 }}>
-            <button onClick={endCall} style={{ width:64, height:64, borderRadius:"50%", border:"none", background:"#ef4444", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 4px 16px rgba(239,68,68,0.3)" }}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.42 19.42 0 0 1 4.43 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.34 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.32 9.9"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* CONNECTED: full white screen with controls */}
-      {callStatus === "connected" && !isNearEar && (
-        <div style={{ position:"fixed", inset:0, zIndex:9999, background:"#fff", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"space-between", fontFamily:"system-ui" }}>
-          <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:12 }}>
-            <div style={{ width:88, height:88, borderRadius:"50%", background:"linear-gradient(135deg,#10b981,#059669)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:32, fontWeight:800, color:"#fff", boxShadow:"0 4px 24px rgba(16,185,129,0.3)" }}>
-              {(callerName ?? (nickname === "Vishwa" ? "Ammu" : "Vishwa")).charAt(0).toUpperCase()}
-            </div>
-            <h2 style={{ fontSize:26, fontWeight:700, color:"#111827", margin:0 }}>{callerName ?? (nickname === "Vishwa" ? "Ammu" : "Vishwa")}</h2>
-            <span style={{ fontSize:20, color:"#6b7280", fontWeight:500, letterSpacing:3 }}>
-              {String(Math.floor(callDuration/60)).padStart(2,"0")}:{String(callDuration%60).padStart(2,"0")}
-            </span>
-            <span style={{ fontSize:12, color: isSpeakerOn?"#10b981":"#9ca3af", fontWeight:500 }}>
-              {isSpeakerOn ? "🔊 Loudspeaker" : "🔇 Earpiece"}
-            </span>
-          </div>
-          <div style={{ display:"flex", gap:28, paddingBottom:60, alignItems:"center" }}>
-            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
-              <button onClick={toggleMic} style={{ width:58, height:58, borderRadius:"50%", border:"none", background:isMicOn?"#f3f4f6":"#1f2937", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 4px 14px rgba(0,0,0,0.1)" }}>
-                {isMicOn
-                  ? <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-                  : <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-                }
-              </button>
-              <span style={{ fontSize:11, color:"#9ca3af", fontWeight:500 }}>{isMicOn?"Mute":"Unmute"}</span>
-            </div>
-            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
-              <button onClick={endCall} style={{ width:72, height:72, borderRadius:"50%", border:"none", background:"#ef4444", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 4px 20px rgba(239,68,68,0.4)" }}>
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.42 19.42 0 0 1 4.43 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.34 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.32 9.9"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-              </button>
-              <span style={{ fontSize:11, color:"#9ca3af", fontWeight:500 }}>End</span>
-            </div>
-            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
-              <button onClick={toggleSpeaker} style={{ width:58, height:58, borderRadius:"50%", border:"none", background:isSpeakerOn?"#10b981":"#f3f4f6", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 4px 14px rgba(0,0,0,0.1)" }}>
-                {isSpeakerOn
-                  ? <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-                  : <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
-                }
-              </button>
-              <span style={{ fontSize:11, color:"#9ca3af", fontWeight:500 }}>{isSpeakerOn?"Speaker":"Earpiece"}</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* BUSY/ENDED */}
-      {(callStatus === "busy" || callStatus === "ended") && (
-        <div style={{ position:"fixed", inset:0, zIndex:9999, background:"#fff", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"space-between", fontFamily:"system-ui" }}>
-          <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:10 }}>
-            <div style={{ width:88, height:88, borderRadius:"50%", background:"#f3f4f6", display:"flex", alignItems:"center", justifyContent:"center" }}>
-              <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.42 19.42 0 0 1 4.43 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.34 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.32 9.9"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-            </div>
-            <h2 style={{ fontSize:22, fontWeight:700, color:"#9ca3af", marginTop:12, marginBottom:0 }}>
-              {callStatus === "busy" ? `${callerName ?? other} is offline` : "Call Ended"}
-            </h2>
-            {callStatus === "ended" && callDuration > 0 && (
-              <span style={{ fontSize:14, color:"#9ca3af" }}>
-                {String(Math.floor(callDuration/60)).padStart(2,"0")}:{String(callDuration%60).padStart(2,"0")}
-              </span>
-            )}
-          </div>
-          <div style={{ paddingBottom:56 }}>
-            <button onClick={endCall} style={{ width:64, height:64, borderRadius:"50%", border:"none", background:"#ef4444", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.42 19.42 0 0 1 4.43 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.34 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.32 9.9"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-            </button>
-          </div>
-        </div>
+      {/* ── Voice call full-screen overlay ── */}
+      {isCallScreenVisible && (
+        <VoiceCallScreen
+          callStatus={callStatus}
+          callerName={callerName}
+          nickname={nickname}
+          isMicOn={isMicOn}
+          isSpeakerOn={isSpeakerOn}
+          isNearEar={isNearEar}
+          onAccept={acceptCall}
+          onReject={rejectCall}
+          onEnd={endCall}
+          onToggleMic={toggleMic}
+          onToggleSpeaker={toggleSpeaker}
+        />
       )}
 
       {isCameraOn && (
@@ -1049,7 +926,7 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
               {/* ── Book icon → popup menu with Camera + Voice Call options ── */}
               <BookIconMenu
                 isCameraSharing={isCameraSharing}
-                isInCall={callStatus !== "idle"}
+                isInCall={isCallScreenVisible}
                 onStartCamera={handleStartCamera}
                 onStartCall={handleStartCall}
               />
