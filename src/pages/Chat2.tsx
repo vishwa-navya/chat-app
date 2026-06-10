@@ -852,26 +852,8 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
       <KissEmojiRain show={showKissRain} onComplete={() => setShowKissRain(false)} />
       <MoodReactor isActive={isReactorActive} onComplete={handleReactorComplete} />
 
-      {/* ── Caller top bar — shows while caller still sees chat (callStatus="calling") ── */}
-      {callStatus === "calling" && (
-        <VoiceCallScreen
-          callStatus={callStatus}
-          callerName={callerName}
-          nickname={nickname}
-          isMicOn={isMicOn}
-          isSpeakerOn={isSpeakerOn}
-          isNearEar={isNearEar}
-          callDuration={callDuration}
-          onAccept={acceptCall}
-          onReject={rejectCall}
-          onEnd={endCall}
-          onToggleMic={toggleMic}
-          onToggleSpeaker={toggleSpeaker}
-        />
-      )}
-
-      {/* ── Voice call full-screen overlay ── */}
-      {isCallScreenVisible && (
+      {/* ── Voice call overlay ── */}
+      {callStatus !== "idle" && (
         <VoiceCallScreen
           callStatus={callStatus}
           callerName={callerName}
