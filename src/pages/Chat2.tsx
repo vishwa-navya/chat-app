@@ -138,7 +138,9 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
   } = useVoiceCall(nickname);
 
   // Is a call screen visible? (calling, incoming, connected, ended, busy)
-  const isCallScreenVisible = callStatus !== "idle";
+  // "calling" = small top bar only (caller still sees chat)
+  // Full white screen only for: incoming, connecting, connected, ended, busy
+  const isCallScreenVisible = callStatus !== "idle" && callStatus !== "calling";
 
   // Book icon menu handlers
   const handleStartCamera = () => {
@@ -850,6 +852,24 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
       <KissEmojiRain show={showKissRain} onComplete={() => setShowKissRain(false)} />
       <MoodReactor isActive={isReactorActive} onComplete={handleReactorComplete} />
 
+      {/* ── Caller top bar — shows while caller still sees chat (callStatus="calling") ── */}
+      {callStatus === "calling" && (
+        <VoiceCallScreen
+          callStatus={callStatus}
+          callerName={callerName}
+          nickname={nickname}
+          isMicOn={isMicOn}
+          isSpeakerOn={isSpeakerOn}
+          isNearEar={isNearEar}
+          callDuration={callDuration}
+          onAccept={acceptCall}
+          onReject={rejectCall}
+          onEnd={endCall}
+          onToggleMic={toggleMic}
+          onToggleSpeaker={toggleSpeaker}
+        />
+      )}
+
       {/* ── Voice call full-screen overlay ── */}
       {isCallScreenVisible && (
         <VoiceCallScreen
@@ -859,6 +879,7 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
           isMicOn={isMicOn}
           isSpeakerOn={isSpeakerOn}
           isNearEar={isNearEar}
+          callDuration={callDuration}
           onAccept={acceptCall}
           onReject={rejectCall}
           onEnd={endCall}
