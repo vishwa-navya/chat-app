@@ -138,9 +138,7 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
   } = useVoiceCall(nickname);
 
   // Is a call screen visible? (calling, incoming, connected, ended, busy)
-  // "calling" = small top bar only (caller still sees chat)
-  // Full white screen only for: incoming, connecting, connected, ended, busy
-  const isCallScreenVisible = callStatus !== "idle" && callStatus !== "calling";
+  // callStatus "calling" = small bar only (VoiceCallScreen handles this internally)
 
   // Book icon menu handlers
   const handleStartCamera = () => {
@@ -852,7 +850,7 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
       <KissEmojiRain show={showKissRain} onComplete={() => setShowKissRain(false)} />
       <MoodReactor isActive={isReactorActive} onComplete={handleReactorComplete} />
 
-      {/* ── Voice call overlay ── */}
+      {/* Voice call — "calling" shows small bar, all other statuses show full screen */}
       {callStatus !== "idle" && (
         <VoiceCallScreen
           callStatus={callStatus}
@@ -929,7 +927,7 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
               {/* ── Book icon → popup menu with Camera + Voice Call options ── */}
               <BookIconMenu
                 isCameraSharing={isCameraSharing}
-                isInCall={isCallScreenVisible}
+                isInCall={callStatus !== "idle"}
                 onStartCamera={handleStartCamera}
                 onStartCall={handleStartCall}
               />
