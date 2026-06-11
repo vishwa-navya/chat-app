@@ -39,7 +39,7 @@ import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import VoiceMessageInline from '../components/VoiceMessageInline';
 import { useAmmeSafetyLogout } from '../hooks/useAmmeSafetyLogout';
 
-const BACKEND_URL = "https://notification-production-bdd8.up.railway.app";
+const BACKEND_URL = "https://notification2.onrender.com";
 
 interface Chat3Props {
   nickname: 'Vishwa' | 'Ammu';
