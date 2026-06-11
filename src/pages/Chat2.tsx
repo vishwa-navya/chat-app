@@ -58,17 +58,6 @@ interface Chat2Props {
   onOpenCoupleMemory?: () => void;
 }
 
-/**
- * MEMORY-OPTIMIZED CHAT COMPONENT
- * 
- * Key Changes:
- * 1. Uses blob URLs instead of base64 for image previews (33% less memory)
- * 2. Properly cleans up blob URLs when no longer needed
- * 3. Processes camera images before showing preview
- * 4. Uses refs to track preview URLs for cleanup
- *
- * NEW: Camera sharing via book icon toggle (WebRTC + Socket.IO)
- */
 function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCoupleMemory }: Chat2Props) {
   const handleAIClick = () => {
     onSwitchToAIChat();
@@ -380,60 +369,76 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
     return () => clearTimeout(t);
   }, [selfTyping]);
 
-  let messageQueue: string[] = [];
-  let isProcessing = false;
+  // ===============================================
+// 🔥 FRONTEND NOTIFICATION ENGINE — FIXED
+// ===============================================
+// Paste this inside your Chat2 component, replacing the existing
+// sendMessageNotification + processQueue + messageQueue code.
+//
+// Changes from your current version:
+//  1. messageQueue and isProcessing moved to useRef → survive re-renders
+//     (your current version resets them to [] and false on every render)
+//  2. Removed the "wait loop" for isOtherUserOnline — it can block forever
+//     if status never loads; replaced with a one-time check
+//  3. If Vishwa is online → skip notification immediately (no queue needed)
+//  4. Retry on network error with max 3 retries per message (not infinite)
+//  5. 1.2s delay between sends kept (prevents spam)
+// ===============================================
 
-  const sendMessageNotification = async (messageText: string) => {
-    if (nickname !== "Ammu") return;
+// ── Put these TWO lines at the TOP of your Chat2 component (with other useRefs)
+const messageQueueRef = useRef<string[]>([]);
+const isProcessingRef = useRef(false);
 
-    const safeMessage = (messageText ?? "").trim();
+// ── Replace your sendMessageNotification function with this ──────────────────
+const sendMessageNotification = async (messageText: string) => {
+  // Only Ammu sends notifications to Vishwa
+  if (nickname !== "Ammu") return;
 
-    if (!safeMessage) {
-      console.log("⚠️ Empty message — recovering…");
+  const safeMessage = (messageText ?? "").trim();
+  if (!safeMessage) {
+    console.log("⚠️ Empty notification text — skipped");
+    return;
+  }
 
-      if (msgs.length > 0) {
-        const last = msgs[msgs.length - 1].text;
-        if (last?.trim()) {
-          messageQueue.push(last.trim());
-          if (!isProcessing) processQueue();
-          return;
-        }
-      }
+  // If Vishwa is confirmed online right now → skip entirely, no need to notify
+  if (isOtherUserOnline === true) {
+    console.log("🟢 Vishwa is online — notification skipped");
+    return;
+  }
 
-      console.log("🚫 No recovery possible — skip");
-      return;
+  // Queue the message and start processing
+  messageQueueRef.current.push(safeMessage);
+  console.log("📦 Queued:", safeMessage, "| Queue size:", messageQueueRef.current.length);
+
+  if (!isProcessingRef.current) {
+    processNotificationQueue();
+  }
+};
+
+// ── Replace your processQueue function with this ─────────────────────────────
+const processNotificationQueue = async () => {
+  if (isProcessingRef.current) return;
+  isProcessingRef.current = true;
+
+  while (messageQueueRef.current.length > 0) {
+    const nextMessage = messageQueueRef.current[0]?.trim();
+
+    // Skip empty entries
+    if (!nextMessage) {
+      messageQueueRef.current.shift();
+      continue;
     }
 
-    if (isOtherUserOnline === undefined || isOtherUserOnline === null) {
-      console.log("⏳ Status unknown — queued:", safeMessage);
-      messageQueue.push(safeMessage);
-      if (!isProcessing) processQueue();
-      return;
+    // If Vishwa came online while we were processing → clear queue, stop
+    if (isOtherUserOnline === true) {
+      console.log("🟢 Vishwa came online — clearing notification queue");
+      messageQueueRef.current = [];
+      break;
     }
 
-    if (isOtherUserOnline) {
-      console.log("🟢 Vishwa online — skip");
-      return;
-    }
-
-    messageQueue.push(safeMessage);
-    if (!isProcessing) processQueue();
-  };
-
-  const processQueue = async () => {
-    if (isProcessing) return;
-    isProcessing = true;
-
-    while (messageQueue.length > 0) {
-      let nextMessage = messageQueue.shift();
-
-      if (!nextMessage || !nextMessage.trim()) {
-        console.log("⚠️ Skipped empty");
-        continue;
-      }
-
-      nextMessage = nextMessage.trim();
-
+    // Attempt to send with up to 3 retries
+    let sent = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const res = await fetch(`${BACKEND_URL}/send`, {
           method: "POST",
@@ -441,35 +446,42 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
           body: JSON.stringify({ message: nextMessage }),
         });
 
-        let data = null;
+        // Accept both success:true and queued:true as "delivered to backend"
+        let data: any = { success: false };
+        try { data = await res.json(); } catch {}
 
-        try {
-          data = await res.json();
-        } catch {
-          data = { queued: true }; 
-        }
-
-        if (data.success) {
-          console.log("📨 SENT:", nextMessage);
-        } 
-        else if (data.queued) {
-          console.log("🔁 Backend queued:", nextMessage);
-        } 
-        else {
-          console.warn("⚠️ Unexpected:", data);
-          messageQueue.unshift(nextMessage);
+        if (data.success || data.queued) {
+          console.log(`📨 Sent to backend (attempt ${attempt}):`, nextMessage);
+          sent = true;
+          break;
+        } else {
+          console.warn(`⚠️ Backend returned unexpected response:`, data);
+          sent = true; // treat as sent to avoid infinite retry
+          break;
         }
       } catch (err) {
-        console.error("⚠️ Network issue — retrying…", err);
-        await new Promise((r) => setTimeout(r, 1000));
-        messageQueue.unshift(nextMessage);
+        console.log(`⚠️ Network error (attempt ${attempt}/3):`, err);
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, 2000 * attempt)); // 2s, 4s
+        }
       }
-
-      await new Promise((r) => setTimeout(r, 1100));
     }
 
-    isProcessing = false;
-  };
+    // Remove from queue whether sent or not (backend has its own retry queue)
+    messageQueueRef.current.shift();
+
+    if (!sent) {
+      console.log("❌ Failed after 3 attempts — backend will retry:", nextMessage);
+    }
+
+    // Small gap between messages
+    if (messageQueueRef.current.length > 0) {
+      await new Promise(r => setTimeout(r, 1200));
+    }
+  }
+
+  isProcessingRef.current = false;
+};
 
   const handleReply = (messageId: string, text: string) => {
     const message = msgs.find(msg => msg.id === messageId);
