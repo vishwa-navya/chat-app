@@ -606,7 +606,7 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
     // ── Receive offer ─────────────────────────────────────────────────────
     socket.on("call-offer", async ({ from, sdp }: { from: string; sdp: RTCSessionDescriptionInit }) => {
       if (from === nickname || cancelledRef.current) return;
-      console.log("[Call] Offer received from:', from);
+      console.log("[Call] Offer received from:", from);
       
       const ok = await getMic();
       if (!ok) { 
