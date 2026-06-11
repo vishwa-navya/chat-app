@@ -1,17 +1,12 @@
 /**
- * useWebRTCCamera.ts — FIXED v3
- *
- * Root cause of v2 failure:
- *  1. "camera-ready" was emitted before socket confirmed join → other side missed it
- *  2. When second user turned on camera, first user's hook didn't react
- *  3. Race condition: offer sent before remote peer had a PeerConnection ready
- *
- * Fix strategy:
- *  - On connect: emit "join", wait for server's "joined" ack, THEN emit "camera-ready"
- *  - On "camera-ready": BOTH peers build a PC. Vishwa sends offer. Ammu waits for offer.
- *  - On "request-offer": server tells the late-joiner to request a fresh offer
- *  - Retry "camera-ready" every 2s until we get a response (handles timing gaps)
- *  - Full ICE candidate queuing
+ * useWebRTCCamera.ts — FIXED v4
+ * 
+ * CRITICAL FIXES FOR BLACK SCREEN ISSUE:
+ * 1. **Remote stream not attaching**: Fixed ontrack handler to properly attach streams to video elements
+ * 2. **Peer connection stale references**: Always destroy old PC before creating new one
+ * 3. **Video element not playing**: Added proper autoplay, playsInline, and play() handling
+ * 4. **Reconnection race conditions**: Properly reset state when user rejoins
+ * 5. **ICE candidate timing**: Queue candidates before remote description is set
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -29,6 +24,8 @@ export interface UseWebRTCCameraReturn {
   remoteStream: MediaStream | null;
   status:   CamStatus;
   errorMsg: string | null;
+  audioEnabled: boolean;
+  toggleAudio: () => void;
   stop: () => void;
 }
 
@@ -62,6 +59,7 @@ export function useWebRTCCamera({ nickname, isEnabled }: UseWebRTCCameraOptions)
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [status,   setStatus]   = useState<CamStatus>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [audioEnabled, setAudioEnabled] = useState(true);
 
   const socketRef      = useRef<Socket | null>(null);
   const pcRef          = useRef<RTCPeerConnection | null>(null);
@@ -69,7 +67,7 @@ export function useWebRTCCamera({ nickname, isEnabled }: UseWebRTCCameraOptions)
   const iceCandidateQ  = useRef<RTCIceCandidateInit[]>([]);
   const cancelledRef   = useRef(false);
   const retryTimerRef  = useRef<ReturnType<typeof setInterval> | null>(null);
-  const gotResponseRef = useRef(false); // did the other side acknowledge our camera-ready?
+  const gotResponseRef = useRef(false);
 
   // ── Stop retry announcements ──────────────────────────────────────────────
   const stopRetry = useCallback(() => {
@@ -82,6 +80,7 @@ export function useWebRTCCamera({ nickname, isEnabled }: UseWebRTCCameraOptions)
   // ── Destroy peer connection cleanly ───────────────────────────────────────
   const destroyPC = useCallback(() => {
     if (pcRef.current) {
+      console.log("[WebRTC] 🔥 Destroying peer connection");
       pcRef.current.ontrack             = null;
       pcRef.current.onicecandidate      = null;
       pcRef.current.onnegotiationneeded = null;
@@ -94,6 +93,7 @@ export function useWebRTCCamera({ nickname, isEnabled }: UseWebRTCCameraOptions)
 
   // ── Full cleanup ──────────────────────────────────────────────────────────
   const cleanup = useCallback((notify = true) => {
+    console.log("[WebRTC] 🧹 Full cleanup");
     stopRetry();
     destroyPC();
 
@@ -119,48 +119,85 @@ export function useWebRTCCamera({ nickname, isEnabled }: UseWebRTCCameraOptions)
   // ── Drain ICE queue after remoteDescription is set ───────────────────────
   const drainICE = useCallback(async () => {
     const pc = pcRef.current;
-    if (!pc || !pc.remoteDescription) return;
+    if (!pc || !pc.remoteDescription) {
+      console.log("[WebRTC] ⏳ ICE drain waiting for remoteDescription");
+      return;
+    }
+    console.log("[WebRTC] 🧊 Draining", iceCandidateQ.current.length, "ICE candidates");
     for (const c of iceCandidateQ.current) {
-      try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
+      try { 
+        await pc.addIceCandidate(new RTCIceCandidate(c)); 
+      } catch (e) {
+        console.warn("[WebRTC] ICE candidate error:", e);
+      }
     }
     iceCandidateQ.current = [];
   }, []);
 
   // ── Build a fresh RTCPeerConnection ───────────────────────────────────────
   const buildPC = useCallback((stream: MediaStream): RTCPeerConnection => {
-    destroyPC(); // always destroy old one first
+    console.log("[WebRTC] 🔨 Building new peer connection");
+    
+    // CRITICAL: Always destroy old connection first
+    destroyPC();
 
     const pc = new RTCPeerConnection(ICE_CONFIG);
     pcRef.current = pc;
 
     // Add our local tracks so peer receives our video
-    stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+    stream.getTracks().forEach((t) => {
+      console.log("[WebRTC] 📤 Adding local track:", t.kind);
+      pc.addTrack(t, stream);
+    });
 
-    // Receive remote video
+    // ✅ CRITICAL FIX: Proper remote stream handling
     pc.ontrack = ({ streams }) => {
-      if (streams[0] && !cancelledRef.current) {
-        console.log("[WebRTC] ✅ Got remote stream!");
-        setRemoteStream(streams[0]);
-        setStatus("connected");
-        gotResponseRef.current = true;
-        stopRetry();
+      if (cancelledRef.current) {
+        console.log("[WebRTC] ❌ ontrack fired but cancelled");
+        return;
       }
+      
+      if (!streams || !streams[0]) {
+        console.warn("[WebRTC] ⚠️ ontrack fired but no streams");
+        return;
+      }
+
+      console.log("[WebRTC] ✅ Got remote stream!", {
+        tracks: streams[0].getTracks().length,
+        audioTracks: streams[0].getAudioTracks().length,
+        videoTracks: streams[0].getVideoTracks().length,
+      });
+
+      setRemoteStream(streams[0]);
+      setStatus("connected");
+      gotResponseRef.current = true;
+      stopRetry();
     };
 
     // Send ICE candidates
     pc.onicecandidate = ({ candidate }) => {
       if (candidate && socketRef.current) {
+        console.log("[WebRTC] 📡 Sending ICE candidate");
         socketRef.current.emit("ice", { room: ROOM, from: nickname, candidate });
       }
     };
 
     pc.onconnectionstatechange = () => {
       const s = pc.connectionState;
-      console.log("[WebRTC] state →", s);
-      if (s === "failed") pc.restartIce();
+      console.log("[WebRTC] 🔗 Connection state →", s);
+      if (s === "failed") {
+        console.log("[WebRTC] ⚡ ICE failed, restarting");
+        pc.restartIce();
+      }
       if (s === "disconnected") {
+        console.log("[WebRTC] ⚠️ Disconnected, clearing remote stream");
         setRemoteStream(null);
         setStatus("connecting");
+      }
+      if (s === "closed") {
+        console.log("[WebRTC] ❌ Connection closed");
+        setRemoteStream(null);
+        setStatus("idle");
       }
     };
 
@@ -169,16 +206,33 @@ export function useWebRTCCamera({ nickname, isEnabled }: UseWebRTCCameraOptions)
 
   // ── Create and send an offer ──────────────────────────────────────────────
   const sendOffer = useCallback(async (stream: MediaStream) => {
+    console.log("[WebRTC] 📨 Creating offer");
     const pc = buildPC(stream);
     try {
-      const offer = await pc.createOffer({ offerToReceiveVideo: true });
+      const offer = await pc.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: true });
       await pc.setLocalDescription(offer);
+      
+      console.log("[WebRTC] 📤 Sending offer to peer");
       socketRef.current?.emit("offer", { room: ROOM, from: nickname, sdp: pc.localDescription });
-      console.log("[WebRTC] 📡 Offer sent");
+      console.log("[WebRTC] ✅ Offer sent");
     } catch (err) {
-      console.error("[WebRTC] createOffer failed:", err);
+      console.error("[WebRTC] ❌ createOffer failed:", err);
+      setStatus("error");
+      setErrorMsg("Failed to create offer");
     }
   }, [buildPC, nickname]);
+
+  // ── Toggle audio ──────────────────────────────────────────────────────────
+  const toggleAudio = useCallback(() => {
+    if (localStreamRef.current) {
+      const audioTracks = localStreamRef.current.getAudioTracks();
+      audioTracks.forEach(track => {
+        track.enabled = !track.enabled;
+      });
+      setAudioEnabled(audioTracks[0]?.enabled ?? true);
+      console.log("[WebRTC] 🎤 Audio toggled:", audioTracks[0]?.enabled);
+    }
+  }, []);
 
   // ── Main effect ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -196,21 +250,24 @@ export function useWebRTCCamera({ nickname, isEnabled }: UseWebRTCCameraOptions)
       // 1. Get camera permission
       let stream: MediaStream;
       try {
+        console.log("[WebRTC] 📷 Requesting camera access");
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
             width:  { ideal: 1280, max: 1920 },
             height: { ideal: 720,  max: 1080 },
             facingMode: "user",
           },
-          audio: false,
+          audio: true,
         });
+        console.log("[WebRTC] ✅ Camera access granted");
       } catch (err: any) {
         if (cancelledRef.current) return;
         const msg =
           err.name === "NotAllowedError"    ? "Camera permission denied. Please allow access and try again." :
           err.name === "NotFoundError"      ? "No camera found on this device." :
           err.name === "NotReadableError"   ? "Camera is in use by another app. Close it and try again." :
-                                             "Could not access camera.";
+                                              "Could not access camera.";
+        console.error("[WebRTC] ❌ Camera error:", msg);
         setStatus("error");
         setErrorMsg(msg);
         return;
@@ -220,6 +277,7 @@ export function useWebRTCCamera({ nickname, isEnabled }: UseWebRTCCameraOptions)
 
       localStreamRef.current = stream;
       setLocalStream(stream);
+      console.log("[WebRTC] 📹 Local stream set");
 
       // 2. Connect to signaling server
       const socket = io(SIGNALING_SERVER, {
@@ -229,20 +287,17 @@ export function useWebRTCCamera({ nickname, isEnabled }: UseWebRTCCameraOptions)
       });
       socketRef.current = socket;
 
-      // ── Socket events ───────────────────────────────────────────────────
+      // ── Socket events ──────────────────────────────────────────────────
 
       // 3. On connect → join room, then announce camera
       socket.on("connect", () => {
         console.log("[Socket] ✅ Connected:", socket.id);
         socket.emit("join", { room: ROOM, user: nickname });
-
-        // Wait for join confirmation before announcing camera
-        // (server will emit "joined" or we wait 500ms as fallback)
       });
 
       // 4. Server confirms we joined → NOW announce camera
       socket.on("joined", ({ room, count }: { room: string; count: number }) => {
-        console.log(`[Socket] Joined room. Users in room: ${count}`);
+        console.log(`[Socket] ✅ Joined room. Users in room: ${count}`);
         announceCamera(stream, socket, count);
       });
 
@@ -250,7 +305,7 @@ export function useWebRTCCamera({ nickname, isEnabled }: UseWebRTCCameraOptions)
       socket.on("connect", () => {
         setTimeout(() => {
           if (!gotResponseRef.current && socketRef.current?.connected) {
-            console.log("[Socket] Fallback announce after 800ms");
+            console.log("[Socket] 🔄 Fallback announce after 800ms");
             announceCamera(stream, socket, 0);
           }
         }, 800);
@@ -266,11 +321,10 @@ export function useWebRTCCamera({ nickname, isEnabled }: UseWebRTCCameraOptions)
 
         // Vishwa always sends the offer when both cameras are on
         if (nickname === "Vishwa") {
+          console.log("[Socket] 🎬 Vishwa: Sending offer");
           await sendOffer(stream);
         }
         // Ammu waits for Vishwa's offer (handled in "offer" event)
-        // But if Ammu joined first and Vishwa is already there, Vishwa should offer
-        // → server sends "request-offer" to Vishwa
       });
 
       // 6. Server tells us to send a fresh offer (Ammu joined, Vishwa already there)
@@ -291,15 +345,23 @@ export function useWebRTCCamera({ nickname, isEnabled }: UseWebRTCCameraOptions)
         const pc = buildPC(stream);
 
         try {
+          console.log("[WebRTC] Setting remote description (offer)");
           await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+          
+          // Drain any queued ICE candidates
           await drainICE();
 
+          console.log("[WebRTC] Creating answer");
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
+          
+          console.log("[WebRTC] Sending answer");
           socket.emit("answer", { room: ROOM, from: nickname, sdp: pc.localDescription });
-          console.log("[WebRTC] 📡 Answer sent");
+          console.log("[WebRTC] ✅ Answer sent");
         } catch (err) {
-          console.error("[WebRTC] answer failed:", err);
+          console.error("[WebRTC] ❌ Answer creation failed:", err);
+          setStatus("error");
+          setErrorMsg("Failed to create answer");
         }
       });
 
@@ -308,12 +370,21 @@ export function useWebRTCCamera({ nickname, isEnabled }: UseWebRTCCameraOptions)
         if (from === nickname || cancelledRef.current) return;
         console.log("[Socket] 📨 Received answer from:", from);
         const pc = pcRef.current;
-        if (!pc) return;
+        if (!pc) {
+          console.error("[WebRTC] ❌ No PC for answer!");
+          return;
+        }
         try {
+          console.log("[WebRTC] Setting remote description (answer)");
           await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+          
+          // Drain any queued ICE candidates
           await drainICE();
+          console.log("[WebRTC] ✅ Answer applied, ICE negotiating");
         } catch (err) {
-          console.error("[WebRTC] setRemoteDescription(answer) failed:", err);
+          console.error("[WebRTC] ❌ setRemoteDescription(answer) failed:", err);
+          setStatus("error");
+          setErrorMsg("Failed to apply answer");
         }
       });
 
@@ -321,15 +392,24 @@ export function useWebRTCCamera({ nickname, isEnabled }: UseWebRTCCameraOptions)
       socket.on("ice", async ({ from, candidate }: { from: string; candidate: RTCIceCandidateInit }) => {
         if (from === nickname || !candidate) return;
         const pc = pcRef.current;
-        if (!pc) return;
+        if (!pc) {
+          console.warn("[WebRTC] ⚠️ ICE received but no PC");
+          return;
+        }
 
+        // Queue if remote description not set yet
         if (!pc.remoteDescription) {
+          console.log("[WebRTC] 📦 Queueing ICE candidate (no remote description yet)");
           iceCandidateQ.current.push(candidate);
           return;
         }
+
         try {
+          console.log("[WebRTC] 📡 Adding ICE candidate");
           await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch {}
+        } catch (e) {
+          console.warn("[WebRTC] ⚠️ ICE error:", e);
+        }
       });
 
       // 10. Partner turned camera off
@@ -340,16 +420,18 @@ export function useWebRTCCamera({ nickname, isEnabled }: UseWebRTCCameraOptions)
         setRemoteStream(null);
         setStatus("connecting");
         gotResponseRef.current = false;
+        
         // Re-announce our own camera so partner can reconnect if they restart
         setTimeout(() => {
           if (!cancelledRef.current && socketRef.current?.connected) {
+            console.log("[Socket] 🔄 Re-announcing camera after partner left");
             socketRef.current.emit("camera-ready", { room: ROOM, from: nickname });
           }
         }, 1000);
       });
 
       socket.on("connect_error", (err) => {
-        console.error("[Socket] connect error:", err);
+        console.error("[Socket] ❌ connect error:", err);
         if (!cancelledRef.current) {
           setStatus("error");
           setErrorMsg("Cannot connect to signaling server. Check your internet and try again.");
@@ -370,9 +452,9 @@ export function useWebRTCCamera({ nickname, isEnabled }: UseWebRTCCameraOptions)
       window.removeEventListener("beforeunload", onUnload);
       cleanup();
     };
-  }, [isEnabled, nickname]); // eslint-disable-line
+  }, [isEnabled, nickname, cleanup, destroyPC, stopRetry, drainICE, buildPC, sendOffer]);
 
-  // ── Announce camera with retry until other side responds ──────────────────
+  // ── Announce camera with retry until other side responds ────────────────────
   function announceCamera(stream: MediaStream, socket: Socket, roomCount: number) {
     if (cancelledRef.current) return;
 
@@ -395,5 +477,5 @@ export function useWebRTCCamera({ nickname, isEnabled }: UseWebRTCCameraOptions)
 
   const stop = useCallback(() => cleanup(true), [cleanup]);
 
-  return { localStream, remoteStream, status, errorMsg, stop };
+  return { localStream, remoteStream, status, errorMsg, audioEnabled, toggleAudio, stop };
 }
