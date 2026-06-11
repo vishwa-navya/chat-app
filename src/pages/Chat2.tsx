@@ -47,7 +47,7 @@ import { useVoiceCall } from '../hooks/useVoiceCall';
 import BookIconMenu from '../components/BookIconMenu';
 // ──────────────────────────────────────────────────────────────────────────────
 
-const BACKEND_URL = "https://notification-production-bdd8.up.railway.app"; //// vishwanavyasree account 12/5/26
+const BACKEND_URL = "https://notification2.onrender.com"; //// vishwanavyasree account 12/5/26
 
 
 interface Chat2Props {
