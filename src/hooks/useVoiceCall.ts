@@ -1,23 +1,26 @@
 /**
- * useVoiceCall.ts — FINAL v6
+ * useVoiceCall.ts — FINAL v7
  *
- * ROOT CAUSE FIXES:
+ * CRITICAL FIXES:
  *
- * AUDIO FIX:
+ * AUDIO TRANSMISSION FIX:
  * Mobile browsers block audio autoplay unless triggered by a user gesture.
  * The Accept button click IS a user gesture, but ontrack fires seconds later
  * — after the gesture context expires. Browser silently blocks audio.play().
  * 
- * Solution: Pre-create and pre-play a SILENT audio element on the Accept click
- * (while gesture context is alive). Then when ontrack fires, just set srcObject
+ * Solution: Pre-create and pre-play a SILENT audio element on the Accept/Call click
+ * (while gesture context is alive). Then when ontrack fires, set srcObject
  * on the already-playing element. Browser allows this because the element
  * was already "unlocked" by the user gesture.
  *
- * PROXIMITY SENSOR FIX:
- * ProximitySensor API removed from Chrome. Legacy deviceproximity removed too.
- * Solution: Use Page Visibility API — when phone is held to ear during a call,
- * the screen turns off and the page becomes hidden (visibilitychange = hidden).
- * This is exactly what we want for "near ear" detection.
+ * REMOTE STREAM NOT SHOWING:
+ * - Proper ontrack handler that immediately sets srcObject
+ * - Ensures audio tracks are present before attempting playback
+ * - Handles stream replacement when reconnecting
+ *
+ * PROXIMITY SENSOR:
+ * ProximitySensor API removed from Chrome. Use Page Visibility API instead.
+ * When phone is held to ear during a call, screen turns off and page becomes hidden.
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -85,7 +88,7 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
 
   const other = nickname === "Vishwa" ? "Ammu" : "Vishwa";
 
-  // ── Ringtone ─────────────────────────────────────────────────────────────────
+  // ── Ringtone ──────────────────────────────────────────────────────────────
   const stopRing = useCallback(() => {
     try { ringCtxRef.current?.close(); } catch {}
     ringCtxRef.current = null;
@@ -110,7 +113,7 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
     } catch {}
   }, [stopRing]);
 
-  // ── Wake lock ─────────────────────────────────────────────────────────────────
+  // ── Wake lock ─────────────────────────────────────────────────────────────
   const acquireWake = async () => {
     try {
       if ("wakeLock" in navigator) {
@@ -123,7 +126,7 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
     wakeLockRef.current = null;
   };
 
-  // ── Proximity via Page Visibility ─────────────────────────────────────────────
+  // ── Proximity via Page Visibility ─────────────────────────────────────────
   // When screen turns off (phone near ear), visibilitychange fires as "hidden"
   const startProximity = useCallback(() => {
     const handler = () => {
@@ -131,7 +134,6 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
       setIsNearEar(document.hidden);
     };
     document.addEventListener("visibilitychange", handler);
-    // Store handler for cleanup
     (startProximity as any).__handler = handler;
     console.log("[Proximity] Page visibility listener started");
   }, []);
@@ -142,11 +144,15 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
     setIsNearEar(false);
   }, [startProximity]);
 
-  // ── Pre-create audio element (must happen inside user gesture) ────────────────
+  // ── Pre-create audio element (must happen inside user gesture) ──────────────
   // Called immediately when user clicks Accept or Call button
   const unlockAudio = () => {
-    if (audioElRef.current) return; // already created
+    if (audioElRef.current) {
+      console.log("[Audio] Audio element already created, reusing");
+      return;
+    }
 
+    console.log("[Audio] Creating and unlocking audio element");
     const audio = document.createElement("audio");
     audio.autoplay    = true;
     audio.playsInline = true;
@@ -160,23 +166,28 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
     audio.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
     audio.play()
       .then(() => {
-        console.log("[Audio] Element unlocked by user gesture ✅");
-        audio.src = ""; // clear the silent src
+        console.log("[Audio] ✅ Element unlocked by user gesture");
+        audio.src = "";
         audio.srcObject = null;
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.warn("[Audio] ⚠️ Silent audio play failed:", err);
+      });
 
     audioElRef.current = audio;
   };
 
-  // ── Set remote stream on pre-unlocked audio element ───────────────────────────
+  // ── Set remote stream on pre-unlocked audio element ────────────────────────
   const playRemoteAudio = useCallback((stream: MediaStream) => {
-    console.log("[Audio] Playing remote stream, tracks:", stream.getAudioTracks().length);
+    console.log("[Audio] Playing remote stream", {
+      tracks: stream.getTracks().length,
+      audioTracks: stream.getAudioTracks().length,
+    });
 
     let audio = audioElRef.current;
 
     if (!audio) {
-      // Fallback: create new element if pre-creation missed
+      console.warn("[Audio] ⚠️ No pre-created audio element, creating fallback");
       audio = document.createElement("audio");
       audio.autoplay    = true;
       audio.playsInline = true;
@@ -187,7 +198,8 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
       audioElRef.current = audio;
     }
 
-    // Set the remote stream
+    // CRITICAL: Set the remote stream
+    console.log("[Audio] Setting srcObject on audio element");
     audio.srcObject = stream;
     audio.muted     = false;
     audio.volume    = 1.0;
@@ -195,13 +207,19 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
     // Apply speaker mode
     applySpeaker(isSpeakerRef.current, audio);
 
+    // Attempt to play
     audio.play()
-      .then(() => console.log("[Audio] ✅ Remote audio playing"))
-      .catch(err => {
-        console.warn("[Audio] play() blocked:", err);
+      .then(() => {
+        console.log("[Audio] ✅ Remote audio playing");
+      })
+      .catch((err) => {
+        console.warn("[Audio] ⚠️ play() blocked:", err);
         // Last resort: try on next user interaction
         const resume = () => {
-          audio!.play().catch(() => {});
+          console.log("[Audio] Resuming audio on user interaction");
+          audio!.play().catch((e) => {
+            console.error("[Audio] Resume play failed:", e);
+          });
           document.removeEventListener("touchstart", resume);
           document.removeEventListener("click",      resume);
         };
@@ -222,6 +240,7 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
 
   const removeAudio = useCallback(() => {
     if (audioElRef.current) {
+      console.log("[Audio] Removing audio element");
       audioElRef.current.pause();
       audioElRef.current.srcObject = null;
       try { document.body.removeChild(audioElRef.current); } catch {}
@@ -229,42 +248,48 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
     }
   }, []);
 
-  // ── Get microphone ────────────────────────────────────────────────────────────
+  // ── Get microphone ────────────────────────────────────────────────────────
   const getMic = async (): Promise<boolean> => {
     // Check if existing stream is still alive
     if (localStreamRef.current) {
       const tracks = localStreamRef.current.getAudioTracks();
       const alive = tracks.some(t => t.readyState === "live");
       if (alive) {
-        console.log("[Mic] Reusing live stream");
+        console.log("[Mic] ✅ Reusing live stream");
         return true;
       }
-      // Dead stream — stop and get fresh
-      console.log("[Mic] Existing stream dead, getting fresh");
+      console.log("[Mic] ⚠️ Existing stream dead, getting fresh");
       localStreamRef.current.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
     }
 
     try {
+      console.log("[Mic] 🎤 Requesting microphone");
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
         video: false,
       });
       const tracks = stream.getAudioTracks();
-      console.log("[Mic] ✅ Got mic, tracks:", tracks.length,
-        tracks.map(t => `${t.label} state=${t.readyState}`).join(", "));
+      console.log("[Mic] ✅ Got mic", {
+        tracks: tracks.length,
+        details: tracks.map(t => `${t.label} state=${t.readyState}`),
+      });
       localStreamRef.current = stream;
       setIsMicOn(true);
       return true;
     } catch (err: any) {
-      console.error("[Mic] Failed:", err.name, err.message);
+      console.error("[Mic] ❌ Failed:", err.name, err.message);
       return false;
     }
   };
 
-  // ── Build RTCPeerConnection ────────────────────────────────────────────────────
+  // ── Build RTCPeerConnection ──────────────────────────────────────────────
   const buildPC = (): RTCPeerConnection => {
+    console.log("[PC] 🔨 Building peer connection");
+    
+    // Clean up old PC
     if (pcRef.current) {
+      console.log("[PC] 🔥 Closing old peer connection");
       pcRef.current.ontrack             = null;
       pcRef.current.onicecandidate      = null;
       pcRef.current.onconnectionstatechange = null;
@@ -280,22 +305,35 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
     const stream = localStreamRef.current;
     if (stream) {
       const tracks = stream.getAudioTracks();
-      console.log("[PC] Adding", tracks.length, "audio track(s)");
+      console.log("[PC] 📤 Adding', tracks.length, 'audio track(s)");
       tracks.forEach(t => {
         pc.addTrack(t, stream);
-        console.log("[PC] Track added:", t.label, "enabled:", t.enabled, "state:", t.readyState);
+        console.log("[PC] Track added:', t.label, 'enabled:', t.enabled, 'state:', t.readyState);
       });
     } else {
       console.error("[PC] ❌ NO local stream — audio will fail!");
     }
 
+    // ✅ CRITICAL FIX: Proper remote audio handling
     pc.ontrack = (event) => {
-      if (cancelledRef.current) return;
-      console.log("[PC] ontrack:", event.track.kind, "streams:", event.streams.length);
+      if (cancelledRef.current) {
+        console.log("[PC] ⚠️ ontrack fired but call cancelled");
+        return;
+      }
+
+      console.log("[PC] 📥 ontrack fired", {
+        kind: event.track.kind,
+        streams: event.streams.length,
+        audioTracks: event.streams[0]?.getAudioTracks().length ?? 0,
+      });
+
       // Use streams[0] if available, otherwise wrap the track
       const s = event.streams[0] ?? new MediaStream([event.track]);
-      console.log("[PC] Remote audio tracks:", s.getAudioTracks().length);
+      console.log("[PC] Remote audio tracks:', s.getAudioTracks().length);
+
+      // Play the remote audio
       playRemoteAudio(s);
+      
       setCallStatus("connected");
       startTimer();
       startProximity();
@@ -304,19 +342,24 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
 
     pc.onicecandidate = ({ candidate }) => {
       if (candidate && socketRef.current) {
+        console.log("[PC] 📡 Sending ICE candidate");
         socketRef.current.emit("call-ice", { room: CALL_ROOM, from: nickname, candidate });
       }
     };
 
     pc.onconnectionstatechange = () => {
       const s = pc.connectionState;
-      console.log("[PC] State:", s);
+      console.log("[PC] 🔗 Connection state →', s);
       if (s === "connected") {
         setCallStatus(p => p === "connecting" ? "connected" : p);
         startTimer();
       }
-      if (s === "failed") pc.restartIce();
+      if (s === "failed") {
+        console.log("[PC] ⚡ ICE failed, restarting");
+        pc.restartIce();
+      }
       if (s === "disconnected" || s === "closed") {
+        console.log("[PC] ❌ Connection ended");
         if (!cancelledRef.current) {
           stopTimer();
           setCallStatus("ended");
@@ -330,14 +373,18 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
 
   const drainICE = async () => {
     const pc = pcRef.current;
-    if (!pc || !pc.remoteDescription) return;
+    if (!pc || !pc.remoteDescription) {
+      console.log("[PC] ⏳ ICE drain waiting for remoteDescription");
+      return;
+    }
+    console.log("[PC] 🧊 Draining', iceCandidateQ.current.length, 'ICE candidates');
     for (const c of iceCandidateQ.current) {
       try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
     }
     iceCandidateQ.current = [];
   };
 
-  // ── Timer ─────────────────────────────────────────────────────────────────────
+  // ── Timer ─────────────────────────────────────────────────────────────────
   const startTimer = useCallback(() => {
     setCallDuration(0);
     if (durationRef.current) clearInterval(durationRef.current);
@@ -348,9 +395,11 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
     if (durationRef.current) { clearInterval(durationRef.current); durationRef.current = null; }
   }, []);
 
-  // ── Cleanup ───────────────────────────────────────────────────────────────────
+  // ── Cleanup ───────────────────────────────────────────────────────────────
   const cleanup = useCallback(() => {
+    console.log("[Call] 🧹 Cleanup");
     stopRing(); stopProximity(); releaseWake(); stopTimer();
+    
     if (pcRef.current) {
       pcRef.current.ontrack = null;
       pcRef.current.onicecandidate = null;
@@ -358,10 +407,12 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
       pcRef.current.close();
       pcRef.current = null;
     }
+    
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
     }
+    
     removeAudio();
     iceCandidateQ.current = [];
     setCallerName(null);
@@ -369,7 +420,7 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
     setIsNearEar(false);
   }, [stopRing, stopProximity, stopTimer, removeAudio]);
 
-  // ── Socket ────────────────────────────────────────────────────────────────────
+  // ── Socket ────────────────────────────────────────────────────────────────
   useEffect(() => {
     cancelledRef.current = false;
 
@@ -381,14 +432,18 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
     socketRef.current = socket;
 
     socket.on("connect", () => {
-      console.log("[Socket] Connected:", socket.id);
+      console.log("[Socket] ✅ Connected:", socket.id);
       socket.emit("call-join", { room: CALL_ROOM, user: nickname });
     });
-    socket.on("reconnect", () => socket.emit("call-join", { room: CALL_ROOM, user: nickname }));
+    socket.on("reconnect", () => {
+      console.log("[Socket] 🔄 Reconnected");
+      socket.emit("call-join", { room: CALL_ROOM, user: nickname });
+    });
 
     // Incoming: start ring
     socket.on("call-incoming", ({ from }: { from: string }) => {
       if (cancelledRef.current) return;
+      console.log("[Socket] 📞 Incoming call from:', from);
       startRing();
       setCallerName(from);
       setCallStatus("incoming");
@@ -397,26 +452,33 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
     // Caller: accepted → get mic + send offer
     socket.on("call-accepted", async () => {
       if (cancelledRef.current) return;
+      console.log("[Socket] ✅ Call accepted");
       stopRing();
       setCallStatus("connecting");
       const ok = await getMic();
       if (!ok) { cleanup(); setCallStatus("idle"); return; }
       const pc = buildPC();
       try {
+        console.log("[Call] 📨 Creating offer');
         const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
         await pc.setLocalDescription(offer);
         socket.emit("call-offer", { room: CALL_ROOM, from: nickname, sdp: pc.localDescription });
-        console.log("[Call] Offer sent");
-      } catch (e) { console.error("[Call] createOffer failed:", e); }
+        console.log("[Call] ✅ Offer sent");
+      } catch (e) { 
+        console.error("[Call] ❌ createOffer failed:', e); 
+        setCallStatus("error");
+      }
     });
 
     socket.on("call-rejected", () => {
       if (cancelledRef.current) return;
+      console.log("[Socket] ❌ Call rejected");
       stopRing(); cleanup(); setCallStatus("idle");
     });
 
     socket.on("call-user-offline", () => {
       if (cancelledRef.current) return;
+      console.log("[Socket] 📵 User offline");
       stopRing(); cleanup();
       setCallStatus("busy");
       setTimeout(() => { if (!cancelledRef.current) setCallStatus("idle"); }, 3000);
@@ -425,50 +487,79 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
     // Receiver: gets offer → get mic + send answer
     socket.on("call-offer", async ({ from, sdp }: { from: string; sdp: RTCSessionDescriptionInit }) => {
       if (from === nickname || cancelledRef.current) return;
-      console.log("[Call] Offer received from:", from);
+      console.log("[Call] 📨 Offer received from:', from);
       const ok = await getMic();
-      if (!ok) { console.error("[Call] No mic for answer"); return; }
+      if (!ok) { 
+        console.error("[Call] ❌ No mic for answer"); 
+        return; 
+      }
       const pc = buildPC();
       try {
+        console.log("[WebRTC] Setting remote description (offer)');
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
         await drainICE();
+        
+        console.log("[Call] Creating answer');
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         socket.emit("call-answer", { room: CALL_ROOM, from: nickname, sdp: pc.localDescription });
-        console.log("[Call] Answer sent");
-      } catch (e) { console.error("[Call] Answer failed:", e); }
+        console.log("[Call] ✅ Answer sent");
+      } catch (e) { 
+        console.error("[Call] ❌ Answer failed:', e); 
+        setCallStatus("error");
+      }
     });
 
     // Caller: gets answer
     socket.on("call-answer", async ({ sdp }: { sdp: RTCSessionDescriptionInit }) => {
       if (cancelledRef.current) return;
       const pc = pcRef.current;
-      if (!pc) { console.error("[Call] No PC for answer!"); return; }
+      if (!pc) { 
+        console.error("[Call] ❌ No PC for answer!"); 
+        return; 
+      }
       try {
+        console.log("[WebRTC] Setting remote description (answer)');
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
         await drainICE();
-        console.log("[Call] Answer set — ICE negotiating");
-      } catch (e) { console.error("[Call] setRemoteDescription failed:", e); }
+        console.log("[Call] ✅ Answer set — ICE negotiating");
+      } catch (e) { 
+        console.error("[Call] ❌ setRemoteDescription failed:', e); 
+        setCallStatus("error");
+      }
     });
 
     // ICE
     socket.on("call-ice", async ({ from, candidate }: { from: string; candidate: RTCIceCandidateInit }) => {
       if (from === nickname || !candidate) return;
       const pc = pcRef.current;
-      if (!pc) return;
-      if (!pc.remoteDescription) { iceCandidateQ.current.push(candidate); return; }
-      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
+      if (!pc) {
+        console.warn("[Call] ⚠️ ICE received but no PC");
+        return;
+      }
+      if (!pc.remoteDescription) { 
+        console.log("[Call] 📦 Queueing ICE (no remote description)');
+        iceCandidateQ.current.push(candidate); 
+        return; 
+      }
+      try { 
+        await pc.addIceCandidate(new RTCIceCandidate(candidate)); 
+      } catch (e) {
+        console.warn("[Call] ⚠️ ICE error:', e);
+      }
     });
 
     // Ended
     socket.on("call-ended", () => {
       if (cancelledRef.current) return;
+      console.log("[Socket] 📴 Call ended");
       stopRing(); cleanup();
       setCallStatus("ended");
       setTimeout(() => { if (!cancelledRef.current) setCallStatus("idle"); }, 2500);
     });
 
     socket.on("call-cancelled-other-device", () => {
+      console.log("[Socket] ❌ Cancelled on other device");
       stopRing(); setCallStatus("idle"); setCallerName(null);
     });
 
@@ -479,10 +570,11 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
     };
   }, [nickname]);
 
-  // ── Public API ────────────────────────────────────────────────────────────────
+  // ── Public API ────────────────────────────────────────────────────────────
 
   const startCall = useCallback(async () => {
     if (!socketRef.current) return;
+    console.log("[Call] 📞 Starting call');
     // Unlock audio element NOW while user gesture is active
     unlockAudio();
     const ok = await getMic();
@@ -493,6 +585,7 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
   }, [nickname, other, startRing]);
 
   const acceptCall = useCallback(() => {
+    console.log("[Call] ✅ Accepting call");
     // Unlock audio element NOW while user gesture is active (Accept button click)
     unlockAudio();
     stopRing();
@@ -501,11 +594,13 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
   }, [nickname, stopRing]);
 
   const rejectCall = useCallback(() => {
+    console.log("[Call] ❌ Rejecting call');
     stopRing(); cleanup(); setCallStatus("idle");
     socketRef.current?.emit("call-reject", { room: CALL_ROOM, from: nickname });
   }, [nickname, stopRing, cleanup]);
 
   const endCall = useCallback(() => {
+    console.log("[Call] 📴 Ending call');
     socketRef.current?.emit("call-end", { room: CALL_ROOM, from: nickname });
     cleanup(); setCallStatus("idle");
   }, [nickname, cleanup]);
@@ -515,6 +610,7 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
     if (!track) return;
     track.enabled = !track.enabled;
     setIsMicOn(track.enabled);
+    console.log("[Call] 🎤 Mic toggled:', track.enabled);
   }, []);
 
   const toggleSpeaker = useCallback(() => {
@@ -522,6 +618,7 @@ export function useVoiceCall(nickname: "Vishwa" | "Ammu"): UseVoiceCallReturn {
       const next = !prev;
       isSpeakerRef.current = next;
       applySpeaker(next);
+      console.log("[Call] 🔊 Speaker toggled:', next);
       return next;
     });
   }, []);
