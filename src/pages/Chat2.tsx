@@ -122,12 +122,11 @@ function Chat2({ nickname, onLogout, onSwitchToAIChat, onSwitchToChat3, onOpenCo
   // ── Voice call state ──────────────────────────────────────────────────────
   const {
     callStatus,
-    remoteStream: callRemoteStream,
-    localStream:  callLocalStream,
     isMicOn,
     isSpeakerOn,
     isNearEar,
     callerName,
+    callDuration,
     startCall,
     acceptCall,
     rejectCall,
