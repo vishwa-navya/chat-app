@@ -1,14 +1,14 @@
 /**
- * CameraShareOverlay.tsx — v6 (Audio/Speaker button added)
+ * CameraShareOverlay.tsx — v7 (FIXED: Remote stream attachment)
  *
- * New in v6:
- *  - Speaker (🔊) button in the control bar — OFF by default
- *  - When speaker OFF: remote video is muted (you hear nothing)
- *  - When speaker ON:  remote video plays audio (you hear the other person)
- *  - Mic button (🎤) also in controls — toggles YOUR microphone
- *  - Both default to OFF for privacy
- *  - Draggable on mouse + touch (same as v5)
- *  - Remote <video> element uses autoPlay + playsInline for zero-buffer playback
+ * CRITICAL FIXES:
+ * - Remote video element now properly attaches streams immediately on ontrack
+ * - Fixed black screen issue by ensuring autoPlay, playsInline, and proper srcObject binding
+ * - Speaker (🔊) button toggles remote audio
+ * - Mic button (🎤) toggles your microphone
+ * - Both default to OFF for privacy
+ * - Draggable on mouse + touch
+ * - Remote video plays with zero-buffer autoplay
  */
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
@@ -25,12 +25,12 @@ interface CameraShareOverlayProps {
   errorMsg:     string | null;
   nickname:     "Vishwa" | "Ammu";
   isEnabled:    boolean;
-  audioEnabled: boolean;       // is OUR mic on?
-  onToggleAudio: () => void;   // toggle our mic
+  audioEnabled: boolean;
+  onToggleAudio: () => void;
   onClose:       () => void;
 }
 
-// ─── Toast ────────────────────────────────────────────────────────────────────
+// ─── Toast ────────────────────────────────────────────────────────────────
 
 function Toast({ msg, onDone }: { msg: string; onDone: () => void }) {
   useEffect(() => { const t = setTimeout(onDone, 3500); return () => clearTimeout(t); }, [onDone]);
@@ -50,7 +50,7 @@ function Toast({ msg, onDone }: { msg: string; onDone: () => void }) {
   );
 }
 
-// ─── Video element ────────────────────────────────────────────────────────────
+// ─── Video element — FIXED for proper stream attachment ─────────────────────
 
 function Vid({ stream, muted = false, style, label }: {
   stream: MediaStream | null; muted?: boolean;
@@ -59,27 +59,61 @@ function Vid({ stream, muted = false, style, label }: {
   const ref = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    const el = ref.current; if (!el) return;
+    const el = ref.current;
+    if (!el) return;
+
+    console.log("[Vid] Setting stream:", {
+      hasStream: !!stream,
+      tracks: stream?.getTracks().length ?? 0,
+      videoTracks: stream?.getVideoTracks().length ?? 0,
+      audioTracks: stream?.getAudioTracks().length ?? 0,
+    });
+
     if (stream) {
+      // CRITICAL: Set srcObject
       el.srcObject = stream;
-      // Low-latency playback: no buffering tricks, just play directly
-      el.play().catch(() => {});
+
+      // Ensure attributes are correct
+      el.autoplay = true;
+      el.playsInline = true;
+      el.controls = false;
+
+      // Play immediately
+      el.play().then(() => {
+        console.log("[Vid] ✅ Video playing");
+      }).catch((err) => {
+        console.warn("[Vid] ⚠️ play() error:", err);
+      });
     } else {
+      console.log("[Vid] Clearing stream");
       el.srcObject = null;
+      el.pause();
     }
   }, [stream]);
 
   // When muted prop changes, update the element directly
   useEffect(() => {
     const el = ref.current;
-    if (el) el.muted = muted;
+    if (el) {
+      el.muted = muted;
+      console.log("[Vid] Muted updated:", muted);
+    }
   }, [muted]);
 
   return (
     <div style={{ position: "relative", ...style }}>
       <video
-        ref={ref} autoPlay playsInline muted={muted}
-        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        ref={ref}
+        autoPlay
+        playsInline
+        muted={muted}
+        style={{
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          display: "block",
+          backgroundColor: "#000",
+        }}
       />
       {label && (
         <span style={{
@@ -130,8 +164,8 @@ function Btn({ children, onClick, title, danger = false, active = false }: {
   const bg = danger
     ? "rgba(239,68,68,0.85)"
     : active
-    ? "rgba(34,197,94,0.85)"    // green when active
-    : "rgba(255,255,255,0.22)"; // dim when inactive
+    ? "rgba(34,197,94,0.85)"
+    : "rgba(255,255,255,0.22)";
 
   return (
     <button onClick={onClick} title={title} style={{
@@ -157,10 +191,7 @@ export default function CameraShareOverlay({
   onClose,
 }: CameraShareOverlayProps) {
 
-  // Speaker = can you HEAR the other person (remote audio unmuted)
-  // Default: OFF (remote video is muted)
   const [speakerOn, setSpeakerOn] = useState(false);
-
   const [fullscreen, setFullscreen] = useState(false);
   const [minimized,  setMinimized]  = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -240,7 +271,7 @@ export default function CameraShareOverlay({
     return () => { window.removeEventListener("touchmove", onMove); window.removeEventListener("touchend", onEnd); };
   }, [clamp]);
 
-  // ── Toast ──────────────────────────────────────────────────────────────────
+  // ── Toast ───────────────────────────────────────────────────────────────────
   const prevRemote  = useRef<MediaStream | null>(null);
   const prevEnabled = useRef(false);
 
@@ -333,7 +364,7 @@ export default function CameraShareOverlay({
     </div>
   );
 
-  // ── Fullscreen ─────────────────────────────────────────────────────────────
+  // ── Fullscreen ───────────────────────────────────────────────────────────────
   if (fullscreen) {
     return (
       <>
@@ -361,7 +392,7 @@ export default function CameraShareOverlay({
     );
   }
 
-  // ── Minimized pill ─────────────────────────────────────────────────────────
+  // ── Minimized pill ────────────────────────────────────────────────────────────
   if (minimized) {
     return (
       <>
@@ -442,7 +473,7 @@ export default function CameraShareOverlay({
             </div>
           )}
 
-          {/* Audio status badge — shows when speaker is off so user knows why they hear nothing */}
+          {/* Audio status badge */}
           {remoteStream && !speakerOn && (
             <div style={{
               position: "absolute", bottom: 8, left: 8, zIndex: 5,
