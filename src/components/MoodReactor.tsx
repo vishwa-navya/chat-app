@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 interface MoodReactorProps {
   isActive: boolean;
@@ -6,7 +6,7 @@ interface MoodReactorProps {
 }
 
 function MoodReactor({ isActive, onComplete }: MoodReactorProps) {
-  const [phase, setPhase] = useState<'emojis' | 'text'>('emojis');
+  const [phase, setPhase] = useState<'idle' | 'emojis' | 'text'>('idle');
   const [emojiElements, setEmojiElements] = useState<
     Array<{ id: number; left: number; delay: number; emoji: string }>
   >([]);
@@ -14,86 +14,129 @@ function MoodReactor({ isActive, onComplete }: MoodReactorProps) {
     Array<{ id: number; left: number; delay: number }>
   >([]);
 
+  // Use refs for timers so they survive re-renders without restarting
+  const emojiTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startedRef       = useRef(false);
+
   useEffect(() => {
-    if (!isActive) return;
+    // Only start once when isActive becomes true
+    if (!isActive || startedRef.current) return;
+    startedRef.current = true;
 
-    // 🔹 RESET STATE ONLY ON FIRST ACTIVATE
+    // Phase 1: emoji rain
     setPhase('emojis');
+    setEmojiElements(
+      Array.from({ length: 40 }).map((_, i) => ({
+        id:    i,
+        left:  Math.random() * 100,
+        delay: Math.random() * 4000,
+        emoji: Math.random() > 0.5 ? '🥳' : '🎉',
+      }))
+    );
 
-    const emojis = Array.from({ length: 40 }).map((_, i) => ({
-      id: i,
-      left: Math.random() * 100,
-      delay: Math.random() * 4000,
-      emoji: Math.random() > 0.5 ? '🥳' : '🎉',
-    }));
-
-    setEmojiElements(emojis);
-
-    // Phase 1 → Phase 2
-    const emojiTimer = setTimeout(() => {
+    // Phase 2: text banners (after 4s)
+    emojiTimerRef.current = setTimeout(() => {
       setPhase('text');
-
-      const texts = Array.from({ length: 12 }).map((_, i) => ({
-        id: i,
-        left: Math.random() * 80 + 10,
-        delay: Math.random() * 6000,
-      }));
-
-      setTextElements(texts);
+      setTextElements(
+        Array.from({ length: 12 }).map((_, i) => ({
+          id:    i,
+          left:  Math.random() * 80 + 10,
+          delay: Math.random() * 6000,
+        }))
+      );
     }, 4000);
 
-    // COMPLETE
-    const completeTimer = setTimeout(() => {
+    // Complete (after 10s total)
+    completeTimerRef.current = setTimeout(() => {
+      setPhase('idle');
+      startedRef.current = false;
       onComplete();
     }, 10000);
 
+    // Cleanup timers if component unmounts mid-animation
+    // But DON'T reset on every re-render — this was the bug
     return () => {
-      clearTimeout(emojiTimer);
-      clearTimeout(completeTimer);
+      // Only cleanup on actual unmount (isActive going false)
     };
-  }, [isActive, onComplete]);
+  }, [isActive]); // ← ONLY depends on isActive, NOT onComplete or selfTyping
 
-  if (!isActive) return null;
+  // When isActive goes false (e.g. component disabled), clean up
+  useEffect(() => {
+    if (!isActive) {
+      if (emojiTimerRef.current)    clearTimeout(emojiTimerRef.current);
+      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+      setPhase('idle');
+      startedRef.current = false;
+    }
+  }, [isActive]);
+
+  if (!isActive || phase === 'idle') return null;
 
   return (
-    <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
+    <div
+      className="fixed inset-0 pointer-events-none z-50 overflow-hidden"
+      // pointer-events-none = NEVER blocks typing or clicks
+    >
+      {/* Phase 1: Emoji rain */}
       {phase === 'emojis' &&
-        emojiElements.map((emoji) => (
+        emojiElements.map((item) => (
           <div
-            key={emoji.id}
-            className="absolute text-4xl animate-fall-emoji"
+            key={item.id}
+            className="absolute text-4xl"
             style={{
-              left: `${emoji.left}%`,
-              top: '-60px',
-              animationDelay: `${emoji.delay}ms`,
-              animationDuration: '3s',
-              animationFillMode: 'forwards',
+              left:               `${item.left}%`,
+              top:                '-60px',
+              animationName:      'fallEmoji',
+              animationDuration:  '3s',
+              animationDelay:     `${item.delay}ms`,
+              animationFillMode:  'forwards',
+              animationTimingFunction: 'ease-in',
+              // No pointer-events — user can type freely
             }}
           >
-            {emoji.emoji}
+            {item.emoji}
           </div>
         ))}
 
+      {/* Phase 2: Text banners */}
       {phase === 'text' &&
-        textElements.map((text) => (
+        textElements.map((item) => (
           <div
-            key={text.id}
-            className="absolute animate-fall-text"
+            key={item.id}
+            className="absolute"
             style={{
-              left: `${text.left}%`,
-              top: '-100px',
-              animationDelay: `${text.delay}ms`,
-              animationDuration: '4s',
-              animationFillMode: 'forwards',
+              left:               `${item.left}%`,
+              top:                '-100px',
+              animationName:      'fallText',
+              animationDuration:  '4s',
+              animationDelay:     `${item.delay}ms`,
+              animationFillMode:  'forwards',
+              animationTimingFunction: 'ease-in',
             }}
           >
-            <div className="px-4 py-3 bg-gradient-to-r from-pink-50 to-purple-50 rounded-full shadow-xl border-2 border-pink-300 backdrop-blur-sm">
+            <div className="px-4 py-3 bg-gradient-to-r from-pink-50 to-purple-50 rounded-full shadow-xl border-2 border-pink-300">
               <p className="text-sm font-serif text-pink-800 font-semibold italic whitespace-nowrap">
                 Both hearts in sync, enjoy this moment ✨
               </p>
             </div>
           </div>
         ))}
+
+      {/* Keyframe animations injected inline */}
+      <style>{`
+        @keyframes fallEmoji {
+          0%   { transform: translateY(0)    rotate(0deg);   opacity: 1; }
+          80%  { opacity: 1; }
+          100% { transform: translateY(110vh) rotate(360deg); opacity: 0; }
+        }
+        @keyframes fallText {
+          0%   { transform: translateY(0);    opacity: 0; }
+          10%  { opacity: 1; }
+          80%  { opacity: 1; }
+          100% { transform: translateY(110vh); opacity: 0; }
+        }
+      `}</style>
     </div>
   );
 }
