@@ -1,144 +1,140 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { doc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
+import { db } from '../firebase';
+import { MoodData } from './useMood';
 
-interface MoodReactorProps {
-  isActive: boolean;
-  onComplete: () => void;
+interface UseMoodReactorProps {
+  userMood: MoodData | null;
+  otherUserMood: MoodData | null;
+  nickname: string;
+  selfTyping: boolean;
+  lastMessageTimestamp?: any;
 }
 
-function MoodReactor({ isActive, onComplete }: MoodReactorProps) {
-  const [phase, setPhase] = useState<'idle' | 'emojis' | 'text'>('idle');
-  const [emojiElements, setEmojiElements] = useState<
-    Array<{ id: number; left: number; delay: number; emoji: string }>
-  >([]);
-  const [textElements, setTextElements] = useState<
-    Array<{ id: number; left: number; delay: number }>
-  >([]);
+// ── Moods that should NEVER trigger celebration ───────────────────────────────
+// Negative / non-celebratory moods
+const EXCLUDED_MOODS = new Set([
+  '🥺', // Sad
+  '🤒', // Fever
+  '😔', // Missing
+  '😣', // Mind upset
+  '😠', // Angry
+  '😡', // Angry (alt)
+  '😩', // Tired
+  '😴', // Sleepy — neutral/not celebratory
+]);
 
-  // Use refs for timers so they survive re-renders without restarting
-  const emojiTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const startedRef       = useRef(false);
+export function useMoodReactor({
+  userMood,
+  otherUserMood,
+  nickname,
+  selfTyping,          // NOTE: only used to PAUSE, not to re-trigger
+}: UseMoodReactorProps) {
+  const [isReactorActive, setIsReactorActive] = useState(false);
+
+  // Firestore-persisted state
+  const [celebrationDone, setCelebrationDone] = useState(false);
+  const [celebrationMood, setCelebrationMood] = useState<string | null>(null);
+
+  // Local refs — stable, don't trigger re-renders
+  const isRunningRef       = useRef(false);
+  const pausedForTypingRef = useRef(false);
+  const firestoreLoadedRef = useRef(false);
+
+  // ── Load celebration status from Firestore ──────────────────────────────────
+  // This persists across re-logins and tab refreshes
+  useEffect(() => {
+    const ref = doc(db, 'moodReactorStatus', nickname);
+    const unsub = onSnapshot(ref, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setCelebrationDone(!!data.completed);
+        setCelebrationMood(data.lastMood ?? null);
+      }
+      firestoreLoadedRef.current = true;
+    });
+    return unsub;
+  }, [nickname]);
+
+  // ── Detect when user RE-SELECTS same mood (manual re-trigger) ──────────────
+  // useMood sends updatedAt timestamp — when user clicks same mood again,
+  // updatedAt changes even if emoji is the same
+  const prevUpdatedAtRef = useRef<Date | null>(null);
 
   useEffect(() => {
-    // Only start once when isActive becomes true
-    if (!isActive || startedRef.current) return;
-    startedRef.current = true;
+    if (!userMood?.emoji || !firestoreLoadedRef.current) return;
+    const newUpdatedAt = userMood.updatedAt;
+    const prevUpdatedAt = prevUpdatedAtRef.current;
 
-    // Phase 1: emoji rain
-    setPhase('emojis');
-    setEmojiElements(
-      Array.from({ length: 40 }).map((_, i) => ({
-        id:    i,
-        left:  Math.random() * 100,
-        delay: Math.random() * 4000,
-        emoji: Math.random() > 0.5 ? '🥳' : '🎉',
-      }))
+    // If updatedAt changed but emoji is the same = user re-selected same mood
+    if (
+      prevUpdatedAt &&
+      newUpdatedAt &&
+      newUpdatedAt.getTime() !== prevUpdatedAt.getTime()
+    ) {
+      const moodChanged = userMood.emoji !== celebrationMood;
+      const reselectedSame = userMood.emoji === celebrationMood;
+
+      if (moodChanged || reselectedSame) {
+        // Reset celebration so it can fire again
+        isRunningRef.current = false;
+        setCelebrationDone(false);
+        setDoc(
+          doc(db, 'moodReactorStatus', nickname),
+          {
+            lastMood:  userMood.emoji,
+            completed: false,
+            timestamp: serverTimestamp(),
+          },
+          { merge: true }
+        );
+        console.log('[MoodReactor] Mood re-selected — celebration reset');
+      }
+    }
+
+    prevUpdatedAtRef.current = newUpdatedAt;
+  }, [userMood?.updatedAt?.getTime(), nickname]);
+
+  // ── MAIN TRIGGER ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!firestoreLoadedRef.current) return;  // wait for Firestore to load
+    if (isRunningRef.current) return;          // already running
+    if (!userMood?.emoji || !otherUserMood?.emoji) return;
+    if (userMood.emoji !== otherUserMood.emoji) return;  // moods must match
+    if (EXCLUDED_MOODS.has(userMood.emoji)) return;      // skip negative moods
+    if (celebrationDone) return;                          // already celebrated this mood
+    // NOTE: selfTyping does NOT block trigger — it only pauses the animation
+    // The trigger fires, but MoodReactor component handles the pause internally
+
+    // ✅ All conditions met — fire celebration
+    isRunningRef.current = true;
+    setIsReactorActive(true);
+
+    // Mark as done in Firestore — prevents re-show on re-login
+    setDoc(
+      doc(db, 'moodReactorStatus', nickname),
+      {
+        lastMood:  userMood.emoji,
+        completed: true,
+        timestamp: serverTimestamp(),
+      },
+      { merge: true }
     );
 
-    // Phase 2: text banners (after 4s)
-    emojiTimerRef.current = setTimeout(() => {
-      setPhase('text');
-      setTextElements(
-        Array.from({ length: 12 }).map((_, i) => ({
-          id:    i,
-          left:  Math.random() * 80 + 10,
-          delay: Math.random() * 6000,
-        }))
-      );
-    }, 4000);
+    console.log('[MoodReactor] 🎉 Celebration started for mood:', userMood.emoji);
+  }, [
+    userMood?.emoji,
+    otherUserMood?.emoji,
+    celebrationDone,
+    firestoreLoadedRef.current,
+    // NOTE: selfTyping intentionally NOT in deps — typing should never re-trigger
+  ]);
 
-    // Complete (after 10s total)
-    completeTimerRef.current = setTimeout(() => {
-      setPhase('idle');
-      startedRef.current = false;
-      onComplete();
-    }, 10000);
+  const handleReactorComplete = () => {
+    isRunningRef.current = false;
+    setIsReactorActive(false);
+    console.log('[MoodReactor] Celebration complete');
+  };
 
-    // Cleanup timers if component unmounts mid-animation
-    // But DON'T reset on every re-render — this was the bug
-    return () => {
-      // Only cleanup on actual unmount (isActive going false)
-    };
-  }, [isActive]); // ← ONLY depends on isActive, NOT onComplete or selfTyping
-
-  // When isActive goes false (e.g. component disabled), clean up
-  useEffect(() => {
-    if (!isActive) {
-      if (emojiTimerRef.current)    clearTimeout(emojiTimerRef.current);
-      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
-      setPhase('idle');
-      startedRef.current = false;
-    }
-  }, [isActive]);
-
-  if (!isActive || phase === 'idle') return null;
-
-  return (
-    <div
-      className="fixed inset-0 pointer-events-none z-50 overflow-hidden"
-      // pointer-events-none = NEVER blocks typing or clicks
-    >
-      {/* Phase 1: Emoji rain */}
-      {phase === 'emojis' &&
-        emojiElements.map((item) => (
-          <div
-            key={item.id}
-            className="absolute text-4xl"
-            style={{
-              left:               `${item.left}%`,
-              top:                '-60px',
-              animationName:      'fallEmoji',
-              animationDuration:  '3s',
-              animationDelay:     `${item.delay}ms`,
-              animationFillMode:  'forwards',
-              animationTimingFunction: 'ease-in',
-              // No pointer-events — user can type freely
-            }}
-          >
-            {item.emoji}
-          </div>
-        ))}
-
-      {/* Phase 2: Text banners */}
-      {phase === 'text' &&
-        textElements.map((item) => (
-          <div
-            key={item.id}
-            className="absolute"
-            style={{
-              left:               `${item.left}%`,
-              top:                '-100px',
-              animationName:      'fallText',
-              animationDuration:  '4s',
-              animationDelay:     `${item.delay}ms`,
-              animationFillMode:  'forwards',
-              animationTimingFunction: 'ease-in',
-            }}
-          >
-            <div className="px-4 py-3 bg-gradient-to-r from-pink-50 to-purple-50 rounded-full shadow-xl border-2 border-pink-300">
-              <p className="text-sm font-serif text-pink-800 font-semibold italic whitespace-nowrap">
-                Both hearts in sync, enjoy this moment ✨
-              </p>
-            </div>
-          </div>
-        ))}
-
-      {/* Keyframe animations injected inline */}
-      <style>{`
-        @keyframes fallEmoji {
-          0%   { transform: translateY(0)    rotate(0deg);   opacity: 1; }
-          80%  { opacity: 1; }
-          100% { transform: translateY(110vh) rotate(360deg); opacity: 0; }
-        }
-        @keyframes fallText {
-          0%   { transform: translateY(0);    opacity: 0; }
-          10%  { opacity: 1; }
-          80%  { opacity: 1; }
-          100% { transform: translateY(110vh); opacity: 0; }
-        }
-      `}</style>
-    </div>
-  );
+  return { isReactorActive, handleReactorComplete };
 }
-
-export default MoodReactor;
